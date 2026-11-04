@@ -1,0 +1,152 @@
+## Husk: finds what is using your disk and says what is safe to delete.
+## This file is the std.app shell: it owns the `State` (view/view.ail) and turns
+## events into changes. Run on macOS with `tools/app-host/macos/run.sh` from the
+## ail checkout: `run.sh path/to/husk/husk.ail`.
+
+use std.app
+use model
+use view
+
+struct Husk
+    s view.State
+
+impl app.App for Husk
+    fn update(mut self, ev app.Event)
+        match ev.kind
+            "resize" if ev.id == "main" =>
+                s.w = ev.dx
+                s.h = ev.dy
+                s.top = s.top.min(view.max_scroll(s))
+            "scroll" =>
+                s.top = (s.top + ev.dy).max(0.0).min(view.max_scroll(s))
+            "click" if ev.id == "main" and ev.text == "left" => click(ev.x, ev.y)
+            "key" => key(ev.text)
+            "external" if ev.id == "scan" => scan(ev.text)
+            _ => return
+
+    fn view(self) app.Node
+        f := view.draw(s)
+        app.canvas("main", 0.0, 0.0, f.ops)
+
+    fn title(self) str
+        "Husk"
+
+## A scan update from the scanner: `pct|files|path`.
+fn Husk.scan(mut self, text str)
+    parts := text.split("|")
+    if parts.len() < 3
+        return
+    s.pct = (parts[0].to_float() else 1.0).max(0.0).min(1.0)
+    s.scan_note = "{parts[1]} files · {parts[2]}"
+
+fn Husk.go(mut self, id int)
+    s.cur = id
+    s.filter = ""
+    s.sel = -1
+    s.top = 0.0
+
+fn Husk.click(mut self, x float, y float)
+    f := view.draw(s)
+    r := view.hit(f, x, y) else return
+    match r.kind
+        "nav" =>
+            s.filter = r.arg
+            s.cur = 0
+            s.sel = -1
+            s.top = 0.0
+        "crumb" => go(r.k)
+        "tile" | "row" =>
+            if s.sel == r.k and s.m.entries[r.k].is_dir and not s.m.entries[r.k].kids.is_empty()
+                go(r.k)
+            else
+                s.sel = r.k
+        "check" =>
+            if not s.marks.add(r.k)
+                s.marks.remove(r.k)
+            s.sel = r.k
+            s.undo = []
+        "sort" =>
+            if s.sort_key == r.arg
+                s.desc = not s.desc
+            else
+                s.sort_key = r.arg
+                s.desc = r.arg != "name"
+            s.top = 0.0
+        "all_safe" =>
+            for id in model.rows(s.m, 0, "safe", s.eff)
+                s.marks.add(id)
+            s.undo = []
+        "review" =>
+            if not s.marks.is_empty()
+                s.sheet = true
+        "cancel" => s.sheet = false
+        "trash" => trash()
+        "undo" => undo()
+        _ => return
+
+## Moves the marked entries to the Trash. The model only hides them here;
+## the real move is `fs.trash` (a std feature the core lane adds), after which
+## `eff` comes from the next scan.
+fn Husk.trash(mut self)
+    ids := model.top_marks(s.m, s.marks)
+    for id in ids
+        s.gone.add(id)
+    s.undo = ids
+    s.marks = {}
+    s.sheet = false
+    s.sel = -1
+    s.eff = model.sizes(s.m, s.gone)
+    if s.eff[s.cur] <= 0
+        s.cur = 0
+
+fn Husk.undo(mut self)
+    for id in s.undo
+        s.gone.remove(id)
+    s.undo = []
+    s.eff = model.sizes(s.m, s.gone)
+
+fn Husk.key(mut self, name str)
+    k := name.to_lower()
+    if k == "escape"
+        s.sheet = false
+    elif k == "backspace" and s.filter == "" and s.cur > 0
+        go(s.m.entries[s.cur].parent)
+
+fn fresh() Husk
+    Husk(s: view.State.new(model.mock()))
+
+fn main()
+    mut h := fresh()
+    app.run(mut h) else err
+        print("no window: {err.kind}: {err.message}")
+
+@test fn starts_on_the_overview()
+    mut h := fresh()
+    screens := app.script(mut h, [app.event("start")])
+    assert(screens[0].contains("canvas #main"))
+    assert_eq(h.s.cur, 0)
+
+@test fn ticking_and_trashing_frees_space()
+    mut h := fresh()
+    before := h.s.eff[0]
+    h.s.filter = "safe"
+    for id in model.rows(h.s.m, 0, "safe", h.s.eff)
+        h.s.marks.add(id)
+    freed := h.s.reclaim()
+    assert(freed > 0)
+    h.trash()
+    assert_eq(h.s.eff[0], before - freed)
+    h.undo()
+    assert_eq(h.s.eff[0], before)
+
+@test fn scan_events_drive_progress()
+    mut h := fresh()
+    ev := app.external("scan", "0.25|1200|/Users/kaleb")
+    h.update(ev)
+    assert(h.s.pct < 0.3)
+    assert(h.s.scan_note.contains("1200 files"))
+
+@test fn overview_has_regions()
+    h := fresh()
+    f := view.draw(h.s)
+    assert(f.regs.len() > 10)
