@@ -1,0 +1,242 @@
+## From a scan to a plan to a safe apply.
+##
+##   candidates  every directory or file a rule rates SAFE or PROBABLY_SAFE,
+##               outermost only (a child of a candidate is never listed again)
+##   choose      the best of them within a byte budget
+##   duplicates  identical files: same size, then the same SHA-256
+##   revalidate  before apply, the path is re-rated; anything that changed is refused
+##   trash_item  the only way Husk removes anything, and it needs `fs.trash`
+##
+## Husk never deletes. Apply moves to the Trash and writes an undo manifest.
+
+use model
+use rules
+use scan
+
+## Known file paths, so rules can check for package.json and friends.
+pub fn markers(s scan.Scan) Set[str]
+    mut known := Set[str]()
+    for e in s.files
+        known.add(e.path)
+    known
+
+fn covered(accepted Set[str], p str) bool
+    mut d := path.dir(p)
+    while d.len() > 1
+        if accepted.contains(d)
+            return true
+        next := path.dir(d)
+        if next == d
+            break
+        d = next
+    false
+
+fn depth_of(it model.Item) int
+    it.path.count("/")
+
+pub fn candidates(
+    s scan.Scan,
+    home str,
+    now_ms int,
+    rs List[rules.Rule],
+    allow_protected bool,
+) List[model.Item]
+    known := markers(s)
+    mut found := List[model.Item]()
+    for d, b in s.dirs
+        v := rules.rate(d, true, 0, home, now_ms, known, rs, allow_protected)
+        if v.rating.rank() < 2
+            found.push(model.Item(path: d, bytes: b, verdict: v))
+    for e in s.files
+        v := rules.rate(e.path, false, e.mtime_ms, home, now_ms, known, rs, allow_protected)
+        if v.rating.rank() < 2
+            found.push(model.Item(path: e.path, bytes: e.bytes(), verdict: v))
+    mut accepted := Set[str]()
+    mut out := List[model.Item]()
+    for it in found.sorted(by: |x| depth_of(x))
+        if covered(accepted, it.path)
+            continue
+        accepted.add(it.path)
+        out.push(it)
+    out
+
+## Safest first, then most confident, then biggest; stop adding at max_bytes.
+## max_bytes <= 0 means no limit. only_safe drops PROBABLY_SAFE.
+pub fn choose(items List[model.Item], max_bytes int, only_safe bool) List[model.Item]
+    ranked := items.sorted(by: |x| (x.verdict.rating.rank(), -x.verdict.confidence, -x.bytes))
+    mut out := List[model.Item]()
+    mut used := 0
+    for it in ranked
+        if only_safe && it.verdict.rating.rank() > 0
+            continue
+        if max_bytes > 0 && used + it.bytes > max_bytes
+            continue
+        used += it.bytes
+        out.push(it)
+    out
+
+pub fn total(items List[model.Item]) int
+    mut n := 0
+    for it in items
+        n += it.bytes
+    n
+
+pub fn plan_json(root str, items List[model.Item], max_bytes int, created_ms int) Json
+    model.document("plan", [
+        model.member("root", Json.Str(root)),
+        model.member("created_ms", model.jint(created_ms)),
+        model.member("max_bytes", model.jint(max_bytes)),
+        model.member("total_bytes", model.jint(total(items))),
+        model.member("items", Json.Arr([model.item_json(it) for it in items])),
+    ])
+
+## One planned path as apply reads it back: only the fields apply trusts.
+pub struct Planned
+    pub path str
+    pub rule str
+    pub bytes int
+
+pub fn parse_plan(text str) List[Planned] ! JsonError
+    doc := parse_json(text)?
+    if doc.int("schema") != 1 || doc.text("kind", "") != "plan"
+        return JsonError(at: -1, message: "not a husk plan, schema 1")
+    mut out := List[Planned]()
+    for it in doc.arr("items") else []
+        out.push(Planned(
+            path: it.need_str("path")?,
+            rule: it.get("verdict")?.text("rule", ""),
+            bytes: it.int("bytes") else 0,
+        ))
+    out
+
+## Why a planned path must not be deleted now, or "" when it may be. The file
+## must still exist and the same rule must still rate it SAFE or PROBABLY_SAFE.
+pub fn revalidate(
+    pl Planned,
+    home str,
+    now_ms int,
+    rs List[rules.Rule],
+    allow_protected bool,
+) str
+    m := fs.metadata(pl.path) else err
+        return "gone: {err}"
+    mut known := Set[str]()
+    parent := path.dir(pl.path)
+    for name in fs.list_dir(parent) else []
+        known.add(path.join(parent, name))
+    v := rules.rate(pl.path, m.is_dir, m.modified_ms, home, now_ms, known, rs, allow_protected)
+    if v.protected
+        return "protected path"
+    if v.rating.rank() > 1
+        return "no longer recommended: {v.reason}"
+    if v.rule != pl.rule
+        return "rule changed from {pl.rule} to {v.rule}"
+    ""
+
+## Identical files: group by size, then confirm by SHA-256 of the contents.
+## Interim: `fs.read_range` will add a cheap head and tail check before the full
+## hash (docs/ail-requests.md). Files over `cap` bytes are not compared.
+pub fn duplicates(
+    s scan.Scan,
+    home str,
+    min_bytes int,
+    cap int,
+    allow_protected bool,
+) List[List[str]] ! fs.IoError
+    mut by_size := {}
+    for e in s.files
+        if e.size >= min_bytes && e.size <= cap && !e.is_symlink
+            if allow_protected || !rules.is_protected(e.path, home)
+                by_size.push(e.size, e.path)
+    mut groups := List[List[str]]()
+    for size, paths in by_size
+        if paths.len() < 2
+            continue
+        mut by_hash := {}
+        for p in paths
+            by_hash.push(hash.sha256(fs.read_bytes(p)?), p)
+        for h, same in by_hash
+            if same.len() > 1
+                groups.push(same.sorted())
+    groups
+
+## Duplicate groups as items: every copy but the first (by path) is PROBABLY_SAFE.
+pub fn duplicate_items(groups List[List[str]], sizes Map[str, int]) List[model.Item]
+    mut out := List[model.Item]()
+    for g in groups
+        keeper := g[0]
+        for p in g[1..]
+            out.push(model.Item(
+                path: p,
+                bytes: sizes[p] else 0,
+                verdict: model.Verdict(
+                    rating: model.Rating.Probably,
+                    confidence: 70,
+                    rule: "duplicate",
+                    reason: "byte-identical to {keeper}; keep one copy",
+                    regrows: false,
+                    protected: false,
+                ),
+            ))
+    out
+
+## Trash one path. Husk's only removal route; it must be `fs.trash`, which moves
+## to the macOS Trash (Put Back works) and gives the new location for the undo
+## manifest. ail has no `fs.trash` yet, so apply refuses to remove anything
+## rather than fall back on `fs.remove` or a rename (docs/ail-requests.md).
+pub fn trash_item(p str) str ! TrashError
+    return TrashError(text: "fs.trash is not in ail yet; nothing was removed: {p}")
+
+pub error struct TrashError "cannot move to the Trash"
+    pub text str
+
+pub fn undo_json(applied List[Planned], created_ms int) Json
+    model.document("undo", [
+        model.member("created_ms", model.jint(created_ms)),
+        model.member("trashed", Json.Arr([Json.Str(a.path) for a in applied])),
+    ])
+
+@test fn covered_checks_every_ancestor()
+    mut accepted := Set[str]()
+    accepted.add("/a/node_modules")
+    assert(covered(accepted, "/a/node_modules/x/y"))
+    assert(!covered(accepted, "/a/node_modules-other/y"))
+    assert(!covered(accepted, "/a/src/y"))
+
+@test fn choose_respects_budget_and_order()
+    safe := model.Verdict(
+        rating: model.Rating.Safe,
+        confidence: 90,
+        rule: "a",
+        reason: "r",
+        regrows: true,
+        protected: false,
+    )
+    prob := model.Verdict(
+        rating: model.Rating.Probably,
+        confidence: 99,
+        rule: "b",
+        reason: "r",
+        regrows: true,
+        protected: false,
+    )
+    items := [
+        model.Item(path: "/p", bytes: 50, verdict: prob),
+        model.Item(path: "/s", bytes: 80, verdict: safe),
+        model.Item(path: "/t", bytes: 30, verdict: safe),
+    ]
+    got := choose(items, 100, false)
+    assert_eq(got.len(), 2)
+    assert_eq(got[0].path, "/s")
+    assert_eq(got[1].path, "/p")
+    assert_eq(choose(items, 0, true).len(), 2)
+
+@test fn plan_round_trips()
+    v := model.Verdict.keep("none", 0, "", false)
+    text := plan_json("/r", [model.Item(path: "/r/a", bytes: 7, verdict: v)], 0, 1).to_text()
+    back := parse_plan(text) else
+        assert(false)
+        return
+    assert_eq(back.len(), 1)
+    assert_eq(back[0].path, "/r/a")
+    assert_eq(back[0].bytes, 7)

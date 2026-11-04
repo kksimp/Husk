@@ -1,0 +1,275 @@
+## Husk's rules: data, not code. Each Rule says "paths like this are SAFE,
+## PROBABLY_SAFE or KEEP, because ...". `rate` picks the most specific rule that
+## fits and returns its Verdict. Nothing here touches the disk: callers pass the
+## set of known file paths (`markers`) so project markers like package.json can
+## be checked without more I/O. Anything no rule recognises is KEEP.
+
+use model
+
+DAY_MS := 86400000
+
+pub struct Rule
+    pub id str
+    pub kind str
+    pub pattern str
+    pub needs str
+    pub min_age_days int
+    pub under str
+    pub expand bool
+    pub rating model.Rating
+    pub confidence int
+    pub reason str
+    pub regrows bool
+
+## kind "prefix": a directory at this home-relative path (expand: each direct child instead).
+## kind "name": a directory with this name, next to the file `needs` ("" for none).
+## kind "ext": a file with one of these extensions ("dmg|pkg"), older than
+## min_age_days, below the home-relative `under` ("" for anywhere).
+fn rule(
+    id str,
+    kind str,
+    pattern str,
+    needs str,
+    min_age_days int,
+    under str,
+    expand bool,
+    rating model.Rating,
+    confidence int,
+    reason str,
+    regrows bool,
+) Rule
+    Rule(
+        id: id,
+        kind: kind,
+        pattern: pattern,
+        needs: needs,
+        min_age_days: min_age_days,
+        under: under,
+        expand: expand,
+        rating: rating,
+        confidence: confidence,
+        reason: reason,
+        regrows: regrows,
+    )
+
+fn dir_rule(id str, pattern str, expand bool, rating model.Rating, confidence int, reason str) Rule
+    rule(id, "prefix", pattern, "", 0, "", expand, rating, confidence, reason, true)
+
+fn name_rule(id str, name str, needs str, rating model.Rating, confidence int, reason str) Rule
+    rule(id, "name", name, needs, 0, "", false, rating, confidence, reason, true)
+
+fn ext_rule(
+    id str,
+    exts str,
+    age int,
+    under str,
+    rating model.Rating,
+    confidence int,
+    reason str,
+) Rule
+    rule(id, "ext", exts, "", age, under, false, rating, confidence, reason, false)
+
+pub fn builtin() List[Rule]
+    safe := model.Rating.Safe
+    prob := model.Rating.Probably
+    keep := model.Rating.Keep
+    [
+        name_rule("xcode.derived", "DerivedData", "", safe, 95, "Xcode build output; Xcode rebuilds it"),
+        dir_rule("xcode.derived2", "Library/Developer/Xcode/DerivedData", false, safe, 95, "Xcode build output; Xcode rebuilds it"),
+        dir_rule("xcode.devsupport", "Library/Developer/Xcode/iOS DeviceSupport", false, prob, 85, "debug symbols; re-copied from a device when you plug it in"),
+        dir_rule("xcode.archives", "Library/Developer/Xcode/Archives", false, keep, 70, "archived app builds; needed to symbolicate crashes and re-submit"),
+        dir_rule("sim.caches", "Library/Developer/CoreSimulator/Caches", false, safe, 90, "simulator caches; rebuilt on launch"),
+        dir_rule("sim.devices", "Library/Developer/CoreSimulator/Devices", false, prob, 60, "simulator disks hold test app data; prefer xcrun simctl delete unavailable"),
+        dir_rule("brew.cache", "Library/Caches/Homebrew", false, safe, 95, "downloaded bottles; brew cleanup removes them"),
+        dir_rule("pip.cache", "Library/Caches/pip", false, safe, 95, "pip download cache"),
+        dir_rule("lib.caches", "Library/Caches", true, prob, 85, "per-app cache; the app rebuilds it, maybe slowly once"),
+        dir_rule("lib.logs", "Library/Logs", false, safe, 85, "old logs; only useful for debugging past problems"),
+        dir_rule("npm.cache", ".npm/_cacache", false, safe, 95, "npm download cache"),
+        dir_rule("cargo.cache", ".cargo/registry/cache", false, safe, 90, "downloaded crates; cargo fetches them again"),
+        dir_rule("gradle.cache", ".gradle/caches", false, prob, 85, "Gradle caches; rebuilt, with a slow first build"),
+        dir_rule("maven.repo", ".m2/repository", false, prob, 75, "Maven artifacts; re-downloaded, but offline builds will fail"),
+        dir_rule("dot.cache", ".cache", true, prob, 85, "per-tool cache under ~/.cache"),
+        dir_rule("trash", ".Trash", false, prob, 90, "already in the Trash; emptying it is permanent"),
+        dir_rule("docker.data", "Library/Containers/com.docker.docker", false, keep, 80, "Docker's disk image holds your images and volumes; use docker system prune"),
+        dir_rule("ios.backup", "Library/Application Support/MobileSync/Backup", false, keep, 70, "iPhone backups; may be your only copy"),
+        name_rule("node_modules", "node_modules", "package.json", safe, 90, "installed packages; npm install restores them"),
+        name_rule("next", ".next", "package.json", safe, 90, "Next.js build output"),
+        name_rule("cargo.target", "target", "Cargo.toml", safe, 90, "Rust build output; cargo build recreates it"),
+        name_rule("swiftpm", ".build", "Package.swift", safe, 90, "SwiftPM build output"),
+        name_rule("pods", "Pods", "Podfile", safe, 85, "CocoaPods checkout; pod install restores it"),
+        name_rule("pycache", "__pycache__", "", safe, 95, "compiled Python; regenerated on import"),
+        name_rule("pytest", ".pytest_cache", "", safe, 95, "pytest cache"),
+        name_rule("mypy", ".mypy_cache", "", safe, 95, "mypy cache"),
+        name_rule("tox", ".tox", "", safe, 90, "tox environments"),
+        name_rule("venv", ".venv", "", prob, 75, "Python virtual environment; recreate with pip install"),
+        name_rule("zigcache", ".zig-cache", "", safe, 90, "Zig build cache"),
+        name_rule("js.build", "build", "package.json", prob, 60, "JavaScript build output; rebuild with the project's build script"),
+        ext_rule("installer", "dmg|pkg|iso|xip", 30, "Downloads", prob, 85, "installer older than 30 days; usually downloadable again"),
+        ext_rule("old.archive", "zip|tar|gz|tgz|7z", 90, "Downloads", prob, 55, "archive older than 90 days in Downloads; check what it holds first"),
+    ]
+
+## Directories Husk never recommends from (rating KEEP) unless the caller passes
+## allow_protected. Home-relative.
+fn protected_home() List[str]
+    [
+        "Documents",
+        "Desktop",
+        "Pictures",
+        "Movies",
+        "Music",
+        ".ssh",
+        ".gnupg",
+        "Library/Mobile Documents",
+        "Library/Keychains",
+        "Library/Messages",
+        "Library/Mail",
+        "Library/Photos",
+        "Library/Application Support/MobileSync",
+    ]
+
+fn protected_abs() List[str]
+    [
+        "/System",
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/etc",
+        "/private",
+        "/Library",
+        "/Applications",
+        "/opt",
+        "/Volumes",
+    ]
+
+pub fn relative(p str, home str) str
+    h := "{home}/"
+    if p.starts_with(h)
+        p.slice(h.len(), p.len())
+    else
+        p
+
+fn within(rel str, dir str) bool
+    rel == dir || rel.starts_with("{dir}/")
+
+pub fn is_protected(p str, home str) bool
+    rel := relative(p, home)
+    if p.contains(".photoslibrary") || p.contains(".musiclibrary")
+        return true
+    if rel != p
+        for d in protected_home()
+            if within(rel, d)
+                return true
+        return false
+    for d in protected_abs()
+        if within(p, d)
+            return true
+    false
+
+fn depth(s str) int
+    s.count("/")
+
+fn fits(r Rule, p str, rel str, is_dir bool, mtime_ms int, now_ms int, markers Set[str]) bool
+    match r.kind
+        "prefix" =>
+            if !is_dir
+                return false
+            if r.expand
+                depth(rel) == depth(r.pattern) + 1 && rel.starts_with("{r.pattern}/")
+            else
+                rel == r.pattern
+        "name" =>
+            if !is_dir || path.base(p) != r.pattern
+                return false
+            r.needs == "" || markers.contains(path.dir(p) + "/" + r.needs)
+        "ext" =>
+            if is_dir
+                return false
+            if r.under != "" && !within(rel, r.under)
+                return false
+            age := (now_ms - mtime_ms) / DAY_MS
+            age >= r.min_age_days && r.pattern.split("|").contains(path.ext(p).to_lower())
+        _ => false
+
+fn specificity(r Rule) int
+    r.pattern.len()
+
+## The verdict for one path. The most specific matching rule wins (longest pattern).
+pub fn rate(
+    p str,
+    is_dir bool,
+    mtime_ms int,
+    home str,
+    now_ms int,
+    markers Set[str],
+    rules List[Rule],
+    allow_protected bool,
+) model.Verdict
+    if !allow_protected && is_protected(p, home)
+        return model.Verdict.keep(
+            "protected",
+            99,
+            "your documents, system or account data; pass allow_protected to let rules apply here",
+            true,
+        )
+    rel := relative(p, home)
+    mut best := -1
+    for i in 0..rules.len()
+        if fits(rules[i], p, rel, is_dir, mtime_ms, now_ms, markers)
+            if best < 0 || specificity(rules[i]) > specificity(rules[best])
+                best = i
+    if best < 0
+        return model.Verdict.keep(
+            "none",
+            40,
+            "no rule recognises this; Husk only recommends what it understands",
+            false,
+        )
+    r := rules[best]
+    model.Verdict(
+        rating: r.rating,
+        confidence: r.confidence,
+        rule: r.id,
+        reason: r.reason,
+        regrows: r.regrows,
+        protected: false,
+    )
+
+fn rated(p str, is_dir bool, age_days int, markers List[str]) model.Verdict
+    mut known := Set[str]()
+    for m in markers
+        known.add(m)
+    rate(
+        p,
+        is_dir,
+        1000000000000 - age_days * DAY_MS,
+        "/Users/u",
+        1000000000000,
+        known,
+        builtin(),
+        false,
+    )
+
+@test fn caches_are_probably_safe_but_homebrew_is_safe()
+    assert_eq(rated("/Users/u/Library/Caches/com.foo", true, 0, []).rule, "lib.caches")
+    assert_eq(rated("/Users/u/Library/Caches/Homebrew", true, 0, []).rule, "brew.cache")
+    assert_eq(rated("/Users/u/Library/Caches/com.foo/deep", true, 0, []).rule, "none")
+
+@test fn node_modules_needs_its_package_json()
+    assert_eq(rated("/Users/u/code/app/node_modules", true, 0, []).rule, "none")
+    v := rated("/Users/u/code/app/node_modules", true, 0, ["/Users/u/code/app/package.json"])
+    assert_eq(v.rule, "node_modules")
+    assert_eq(v.rating.name(), "SAFE")
+
+@test fn documents_are_protected()
+    v := rated("/Users/u/Documents/app/node_modules", true, 0, ["/Users/u/Documents/app/package.json"])
+    assert(v.protected)
+    assert_eq(v.rating.name(), "KEEP")
+    assert(rules_protected_system())
+
+fn rules_protected_system() bool
+    is_protected("/System/Library/x", "/Users/u") && !is_protected("/Users/u/code", "/Users/u")
+
+@test fn old_installers_in_downloads()
+    assert_eq(rated("/Users/u/Downloads/x.dmg", false, 45, []).rule, "installer")
+    assert_eq(rated("/Users/u/Downloads/x.dmg", false, 3, []).rule, "none")
+    assert_eq(rated("/Users/u/Desktop/x.dmg", false, 45, []).rule, "protected")
