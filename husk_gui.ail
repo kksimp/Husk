@@ -4,7 +4,7 @@
 ## ail checkout: `run.sh path/to/husk/husk.ail`.
 
 use std.app
-use model
+use mock
 use view
 
 struct Husk
@@ -73,7 +73,7 @@ fn Husk.click(mut self, x float, y float)
                 s.desc = r.arg != "name"
             s.top = 0.0
         "all_safe" =>
-            for id in model.rows(s.m, 0, "safe", s.eff)
+            for id in mock.rows(s.m, 0, "safe", s.eff)
                 s.marks.add(id)
             s.undo = []
         "review" =>
@@ -88,14 +88,14 @@ fn Husk.click(mut self, x float, y float)
 ## the real move is `fs.trash` (a std feature the core lane adds), after which
 ## `eff` comes from the next scan.
 fn Husk.trash(mut self)
-    ids := model.top_marks(s.m, s.marks)
+    ids := mock.top_marks(s.m, s.marks)
     for id in ids
         s.gone.add(id)
     s.undo = ids
     s.marks = {}
     s.sheet = false
     s.sel = -1
-    s.eff = model.sizes(s.m, s.gone)
+    s.eff = mock.sizes(s.m, s.gone)
     if s.eff[s.cur] <= 0
         s.cur = 0
 
@@ -103,7 +103,7 @@ fn Husk.undo(mut self)
     for id in s.undo
         s.gone.remove(id)
     s.undo = []
-    s.eff = model.sizes(s.m, s.gone)
+    s.eff = mock.sizes(s.m, s.gone)
 
 fn Husk.key(mut self, name str)
     k := name.to_lower()
@@ -113,7 +113,7 @@ fn Husk.key(mut self, name str)
         go(s.m.entries[s.cur].parent)
 
 fn fresh() Husk
-    Husk(s: view.State.new(model.mock()))
+    Husk(s: view.State.new(mock.mock()))
 
 fn main()
     mut h := fresh()
@@ -130,7 +130,7 @@ fn main()
     mut h := fresh()
     before := h.s.eff[0]
     h.s.filter = "safe"
-    for id in model.rows(h.s.m, 0, "safe", h.s.eff)
+    for id in mock.rows(h.s.m, 0, "safe", h.s.eff)
         h.s.marks.add(id)
     freed := h.s.reclaim()
     assert(freed > 0)

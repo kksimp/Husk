@@ -1,4 +1,4 @@
-## model: the scanned tree Husk shows. This is a MOCK with a fixed Mac-like tree
+## mock: the scanned tree Husk shows. This is a MOCK with a fixed Mac-like tree
 ## until the core lane's real model (scan + cleanup rules) lands; the shapes
 ## here (flat `Entry` list, parent before children, `safety` + `reason`) are
 ## what the GUI needs from it.

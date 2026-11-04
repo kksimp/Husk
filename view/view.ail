@@ -3,13 +3,13 @@
 ## regions, so what is drawn and what is hit cannot drift apart.
 
 use std.app
-use model
+use mock
 use treemap
 use look
 
 ## Everything the window needs to remember.
 pub struct State
-    pub m model.Model
+    pub m mock.Model
     pub eff List[int]
     pub gone Set[int]
     pub marks Set[int]
@@ -49,10 +49,10 @@ HEAD_H := 26.0
 DETAIL_H := 68.0
 FOOT_H := 54.0
 
-pub fn State.new(m model.Model) State
+pub fn State.new(m mock.Model) State
     State(
         m: m,
-        eff: model.sizes(m, {}),
+        eff: mock.sizes(m, {}),
         gone: {},
         marks: {},
         cur: 0,
@@ -71,7 +71,7 @@ pub fn State.new(m model.Model) State
 
 ## The ids the list and treemap show, in the order the user sorted them.
 pub fn State.shown(self) List[int]
-    ids := model.rows(m, cur, filter, eff)
+    ids := mock.rows(m, cur, filter, eff)
     if sort_key == "name"
         by := ids.sorted(by: |i| m.entries[i].name.to_lower())
         return if desc then by.reversed() else by
@@ -93,7 +93,7 @@ fn rank(s str) int
 ## Total bytes the marks would free.
 pub fn State.reclaim(self) int
     mut t := 0
-    for id in model.top_marks(m, marks)
+    for id in mock.top_marks(m, marks)
         t += eff[id]
     t
 
@@ -102,7 +102,7 @@ fn State.title(self) str
         return m.entries[cur].name
     if filter == "safe"
         return "Safe to delete"
-    for c in model.CATS
+    for c in mock.CATS
         if c.0 == filter
             return c.1
     filter
@@ -149,21 +149,21 @@ fn sidebar(s State, mut ops List[app.Op], mut regs List[Region])
     if rec > 2.0
         look.round(mut ops, 20.0 + uw - rec, 104.0, rec, 8.0, 4.0, look.SAFE, look.SIDE)
     free := s.m.vol_total - s.m.vol_used
-    ops.push(look.text(20.0, 120.0, "{model.fmt_size(s.m.vol_used)} of {model.fmt_size(s.m.vol_total)} used", look.DIM, 11.0, false))
-    ops.push(look.text(20.0, 136.0, "{model.fmt_size(free)} free", look.TEXT, 11.0, false))
+    ops.push(look.text(20.0, 120.0, "{mock.fmt_size(s.m.vol_used)} of {mock.fmt_size(s.m.vol_total)} used", look.DIM, 11.0, false))
+    ops.push(look.text(20.0, 136.0, "{mock.fmt_size(free)} free", look.TEXT, 11.0, false))
     if s.reclaim() > 0
-        ops.push(look.text(20.0, 152.0, "{model.fmt_size(free + s.reclaim())} free after cleanup", look.SAFE, 11.0, false))
+        ops.push(look.text(20.0, 152.0, "{mock.fmt_size(free + s.reclaim())} free after cleanup", look.SAFE, 11.0, false))
     # Views.
     mut y := 184.0
-    items := [("", "Overview", "{model.fmt_size(s.eff[0])}"), ("safe", "Safe to delete", "{model.fmt_size(model.filter_total(s.m, "safe", s.eff))}")]
+    items := [("", "Overview", "{mock.fmt_size(s.eff[0])}"), ("safe", "Safe to delete", "{mock.fmt_size(mock.filter_total(s.m, "safe", s.eff))}")]
     y = nav_row(s, mut ops, mut regs, y, items[0].0, items[0].1, items[0].2)
     y = nav_row(s, mut ops, mut regs, y, items[1].0, items[1].1, items[1].2)
     ops.push(look.text(20.0, y + 14.0, "CATEGORIES", look.DIM, 10.0, true))
     y += 34.0
-    for c in model.CATS
-        total := model.filter_total(s.m, c.0, s.eff)
+    for c in mock.CATS
+        total := mock.filter_total(s.m, c.0, s.eff)
         if total > 0
-            y = nav_row(s, mut ops, mut regs, y, c.0, c.1, model.fmt_size(total))
+            y = nav_row(s, mut ops, mut regs, y, c.0, c.1, mock.fmt_size(total))
 
 fn nav_row(s State, mut ops List[app.Op], mut regs List[Region], y float, id str, name str, size str) float
     on := s.filter == id
@@ -181,7 +181,7 @@ fn toolbar(s State, mut ops List[app.Op], mut regs List[Region])
     rect(mut ops, x0, TOOL_H - 1.0, s.w - x0, 1.0, look.LINE)
     mut x := x0 + 16.0
     if s.filter == ""
-        trail := model.trail(s.m, s.cur)
+        trail := mock.trail(s.m, s.cur)
         for i, id in trail.enumerate()
             last := i == trail.len() - 1
             name := s.m.entries[id].name
@@ -223,7 +223,7 @@ fn treemap_view(s State, ids List[int], mut ops List[app.Op], mut regs List[Regi
             ops.push(look.text(b.x + b.w - 20.0, b.y + 6.0, "✓", 0xffffff, 13.0, true))
         if b.w > 76.0 and b.h > 38.0
             ops.push(look.text(b.x + 10.0, b.y + 8.0, look.fit(e.name, b.w - 36.0, 12.0), 0xffffff, 12.0, true))
-            ops.push(look.text(b.x + 10.0, b.y + 25.0, model.fmt_size(s.eff[id]), look.mix(0xffffff, c, 0.2), 11.0, false))
+            ops.push(look.text(b.x + 10.0, b.y + 25.0, mock.fmt_size(s.eff[id]), look.mix(0xffffff, c, 0.2), 11.0, false))
         reg(mut regs, b.x, b.y, b.w, b.h, "tile", id, "")
 
 ## Ids by size, largest first, for the treemap.
@@ -267,7 +267,7 @@ fn list_view(s State, ids List[int], mut ops List[app.Op], mut regs List[Region]
         reg(mut regs, cx - 6.0, ry.max(top), 30.0, vis, "check", id, "")
         mark := if e.is_dir then "▸ " else ""
         ops.push(look.text(nx, ry + 8.0, look.fit("{mark}{e.name}", nw - 8.0, 12.0), look.TEXT, 12.0, false))
-        ops.push(look.text(sx, ry + 8.0, model.fmt_size(s.eff[id]), look.DIM, 12.0, false))
+        ops.push(look.text(sx, ry + 8.0, mock.fmt_size(s.eff[id]), look.DIM, 12.0, false))
         c := look.safety_color(e.safety)
         look.round(mut ops, bx, ry + 11.0, (104.0 * s.eff[id].to_float() / biggest).max(3.0), 8.0, 3.0, look.mix(bg, c, 0.7), bg)
         badge(mut ops, gx, ry + 5.0, e.safety, bg)
@@ -291,24 +291,24 @@ fn detail(s State, mut ops List[app.Op], y float)
         ops.push(look.text(x0 + 16.0, y + 24.0, "Select an item to see why Husk suggests keeping or deleting it.", look.DIM, 12.0, false))
         return
     e := s.m.entries[s.sel]
-    path := model.trail(s.m, s.sel).map(|i| s.m.entries[i].name).join(" / ")
+    path := mock.trail(s.m, s.sel).map(|i| s.m.entries[i].name).join(" / ")
     ops.push(look.text(x0 + 16.0, y + 10.0, e.name, look.TEXT, 13.0, true))
     badge(mut ops, x0 + 24.0 + look.width(e.name, 13.0), y + 8.0, e.safety, look.PANEL)
     ops.push(look.text(x0 + 16.0, y + 30.0, look.fit(e.reason, s.w - x0 - 32.0, 12.0), look.TEXT, 12.0, false))
     age := if e.age == "" then "" else " · last used {e.age}"
-    ops.push(look.text(x0 + 16.0, y + 48.0, look.fit("{model.fmt_size(s.eff[s.sel])}{age} · {path}", s.w - x0 - 32.0, 11.0), look.DIM, 11.0, false))
+    ops.push(look.text(x0 + 16.0, y + 48.0, look.fit("{mock.fmt_size(s.eff[s.sel])}{age} · {path}", s.w - x0 - 32.0, 11.0), look.DIM, 11.0, false))
 
 ## The bottom bar: what is selected, or the undo for the last trash.
 fn footer(s State, mut ops List[app.Op], mut regs List[Region], y float)
     x0 := SIDE_W
     rect(mut ops, x0, y, s.w - x0, FOOT_H, look.SIDE)
     rect(mut ops, x0, y, s.w - x0, 1.0, look.LINE)
-    n := model.top_marks(s.m, s.marks).len()
+    n := mock.top_marks(s.m, s.marks).len()
     if not s.undo.is_empty()
         ops.push(look.text(x0 + 16.0, y + 19.0, "Moved {s.undo.len()} items to the Trash", look.SAFE, 12.0, true))
         button(mut ops, mut regs, x0 + 220.0, y + 13.0, 70.0, "Undo", false, look.SIDE, "undo")
     elif n > 0
-        ops.push(look.text(x0 + 16.0, y + 19.0, "{n} selected · {model.fmt_size(s.reclaim())} can be freed", look.TEXT, 12.0, true))
+        ops.push(look.text(x0 + 16.0, y + 19.0, "{n} selected · {mock.fmt_size(s.reclaim())} can be freed", look.TEXT, 12.0, true))
     else
         ops.push(look.text(x0 + 16.0, y + 19.0, "Tick items to clear them out. Nothing is deleted until you confirm.", look.DIM, 12.0, false))
     button(mut ops, mut regs, s.w - 332.0, y + 13.0, 120.0, "Select all safe", false, look.SIDE, "all_safe")
@@ -317,7 +317,7 @@ fn footer(s State, mut ops List[app.Op], mut regs List[Region], y float)
 ## The confirmation sheet: exactly what goes to the Trash.
 fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
     reg(mut regs, 0.0, 0.0, s.w, s.h, "scrim", 0, "")
-    top := model.top_marks(s.m, s.marks)
+    top := mock.top_marks(s.m, s.marks)
     shown := top.take(8)
     pw := (s.w - 60.0).min(560.0)
     ph := 190.0 + shown.len().to_float() * 30.0
@@ -327,7 +327,7 @@ fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
     look.round(mut ops, px - 1.0, py - 1.0, pw + 2.0, ph + 2.0, 13.0, look.LINE, look.BG)
     look.round(mut ops, px, py, pw, ph, 12.0, look.PANEL, look.LINE)
     ops.push(look.text(px + 24.0, py + 20.0, "Move {top.len()} items to the Trash?", look.TEXT, 16.0, true))
-    ops.push(look.text(px + 24.0, py + 46.0, "Frees {model.fmt_size(s.reclaim())}. They stay in the Trash until you empty it, and Undo puts them back.", look.DIM, 11.0, false))
+    ops.push(look.text(px + 24.0, py + 46.0, "Frees {mock.fmt_size(s.reclaim())}. They stay in the Trash until you empty it, and Undo puts them back.", look.DIM, 11.0, false))
     mut risky := 0
     for n, id in shown.enumerate()
         ry := py + 74.0 + n.to_float() * 30.0
@@ -336,7 +336,7 @@ fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
             risky += 1
         ops.push(look.text(px + 24.0, ry + 7.0, look.fit(e.name, pw - 220.0, 12.0), look.TEXT, 12.0, false))
         badge(mut ops, px + pw - 170.0, ry + 4.0, e.safety, look.PANEL)
-        sz := model.fmt_size(s.eff[id])
+        sz := mock.fmt_size(s.eff[id])
         ops.push(look.text(px + pw - 24.0 - look.width(sz, 12.0), ry + 7.0, sz, look.DIM, 12.0, false))
     if top.len() > shown.len()
         ops.push(look.text(px + 24.0, py + 74.0 + shown.len().to_float() * 30.0 + 6.0, "and {top.len() - shown.len()} more", look.DIM, 11.0, false))
