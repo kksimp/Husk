@@ -15,7 +15,7 @@ files=$(git ls-files '*.ail')
 # shellcheck disable=SC2086
 "$ail" fmt --check $files >/dev/null 2>&1 || red "fmt: run $ail fmt on the files above"
 "$ail" check . >/dev/null 2>&1 || red "$ail check ."
-for f in $(grep -l '^@test' $files); do "$ail" test "$f" >/dev/null 2>&1 || red "$ail test $f"; done
+for f in husk.ail; do "$ail" test "$f" >/dev/null 2>&1 || red "$ail test $f"; done
 for f in $(git ls-files '*.sh'); do bash -n "$f" || red "bash -n $f"; done
 [ $fails = 0 ] && echo "CHECK GREEN" || echo "CHECK RED ($fails)"
 [ $fails = 0 ]

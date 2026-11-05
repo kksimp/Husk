@@ -110,7 +110,16 @@ fn explain_doc(p str, allow_protected bool) Json ! fs.IoError
     mut nbytes := m.size
     if m.is_dir
         nbytes = scan.scan(p)?.total
-    v := rules.rate(p, m.is_dir, m.modified_ms, home(), time.now_ms(), known, rules.builtin(), allow_protected)
+    v := rules.rate(
+        p,
+        m.is_dir,
+        m.modified_ms,
+        home(),
+        time.now_ms(),
+        known,
+        rules.builtin(),
+        allow_protected,
+    )
     model.document("explain", [
         model.member("path", Json.Str(p)),
         model.member("bytes", model.jint(nbytes)),
@@ -230,11 +239,25 @@ fn tool(name str, desc str, s Json) Json
 fn tools_json() str
     path_prop := model.member("path", model.obj([model.member("type", Json.Str("string"))]))
     int_prop := model.obj([model.member("type", Json.Str("integer"))])
-    Json.Arr([
-        tool("husk_scan", "Total the folders under a path and list the biggest. Returns schema-1 JSON.", schema([path_prop, model.member("top", int_prop)], ["path"])),
-        tool("husk_explain", "Rate one path SAFE, PROBABLY_SAFE or KEEP with a reason and confidence.", schema([path_prop], ["path"])),
-        tool("husk_plan", "List what could be deleted within max_bytes, safest first. Does not delete.", schema([path_prop, model.member("max_bytes", int_prop)], ["path"])),
-    ]).to_text()
+    Json
+        .Arr([
+            tool(
+                "husk_scan",
+                "Total the folders under a path and list the biggest. Returns schema-1 JSON.",
+                schema([path_prop, model.member("top", int_prop)], ["path"]),
+            ),
+            tool(
+                "husk_explain",
+                "Rate one path SAFE, PROBABLY_SAFE or KEEP with a reason and confidence.",
+                schema([path_prop], ["path"]),
+            ),
+            tool(
+                "husk_plan",
+                "List what could be deleted within max_bytes, safest first. Does not delete.",
+                schema([path_prop, model.member("max_bytes", int_prop)], ["path"]),
+            ),
+        ])
+        .to_text()
 
 fn call_tool(name str, args Json) str ! fs.IoError | UsageError
     p := args.text("path", "")

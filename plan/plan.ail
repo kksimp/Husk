@@ -111,13 +111,7 @@ pub fn parse_plan(text str) List[Planned] ! JsonError
 
 ## Why a planned path must not be deleted now, or "" when it may be. The file
 ## must still exist and the same rule must still rate it SAFE or PROBABLY_SAFE.
-pub fn revalidate(
-    pl Planned,
-    home str,
-    now_ms int,
-    rs List[rules.Rule],
-    allow_protected bool,
-) str
+pub fn revalidate(pl Planned, home str, now_ms int, rs List[rules.Rule], allow_protected bool) str
     m := fs.metadata(pl.path) else err
         return "gone: {err}"
     mut known := Set[str]()
@@ -166,18 +160,14 @@ pub fn duplicate_items(groups List[List[str]], sizes Map[str, int]) List[model.I
     for g in groups
         keeper := g[0]
         for p in g[1..]
-            out.push(model.Item(
-                path: p,
-                bytes: sizes.get(p) else 0,
-                verdict: model.Verdict(
-                    rating: model.Rating.Probably,
-                    confidence: 70,
-                    rule: "duplicate",
-                    reason: "byte-identical to {keeper}; keep one copy",
-                    regrows: false,
-                    protected: false,
-                ),
-            ))
+            out.push(model.Item(path: p, bytes: sizes.get(p) else 0, verdict: model.Verdict(
+                rating: model.Rating.Probably,
+                confidence: 70,
+                rule: "duplicate",
+                reason: "byte-identical to {keeper}; keep one copy",
+                regrows: false,
+                protected: false,
+            )))
     out
 
 ## Trash one path. Husk's only removal route; it must be `fs.trash`, which moves
@@ -225,10 +215,11 @@ pub fn undo_json(applied List[Planned], created_ms int) Json
         model.Item(path: "/s", bytes: 80, verdict: safe),
         model.Item(path: "/t", bytes: 30, verdict: safe),
     ]
-    got := choose(items, 100, false)
+    got := choose(items, 130, false)
     assert_eq(got.len(), 2)
     assert_eq(got[0].path, "/s")
-    assert_eq(got[1].path, "/p")
+    assert_eq(got[1].path, "/t")
+    assert_eq(choose(items, 0, false)[2].path, "/p")
     assert_eq(choose(items, 0, true).len(), 2)
 
 @test fn plan_round_trips()
