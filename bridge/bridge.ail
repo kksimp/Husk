@@ -12,9 +12,25 @@ fn base(p str) str
     path.base(p)
 
 fn cat_of(rule str) str
-    if rule.starts_with("xcode") or rule.starts_with("sim.") or rule.starts_with("cargo") or rule.starts_with("gradle") or rule.starts_with("maven")
+    if rule.starts_with("xcode")
+        or rule.starts_with("sim.")
+        or rule.starts_with("cargo")
+        or rule.starts_with("gradle")
+        or rule.starts_with("maven")
         return "dev"
-    if ["node_modules", "next", "swiftpm", "pods", "venv", "tox", "zigcache", "js.build", "pycache", "pytest", "mypy"].contains(rule)
+    if [
+        "node_modules",
+        "next",
+        "swiftpm",
+        "pods",
+        "venv",
+        "tox",
+        "zigcache",
+        "js.build",
+        "pycache",
+        "pytest",
+        "mypy",
+    ].contains(rule)
         return "dev"
     if rule == "lib.logs"
         return "logs"
@@ -76,13 +92,33 @@ pub fn tree(s scan.Scan, home str, now_ms int, min_bytes int) mock.Model
                 why = "inside {pe.name}: {pe.reason}"
                 cat = pe.cat
         name := if parent < 0 then p else base(p)
-        id := mock.add(mut m, parent, name, size, not is_file, safety, why, cat, age_of(mtime, now_ms))
+        id := mock.add(
+            mut m,
+            parent,
+            name,
+            size,
+            not is_file,
+            safety,
+            why,
+            cat,
+            age_of(mtime, now_ms),
+        )
         m.entries[id].path = p
         at[p] = id
     m
 
 fn files_zero() model.Entry
-    model.Entry(path: "", size: 0, alloc: 0, mtime_ms: 0, is_dir: false, dev: 0, ino: 0, nlink: 1, is_symlink: false)
+    model.Entry(
+        path: "",
+        size: 0,
+        alloc: 0,
+        mtime_ms: 0,
+        is_dir: false,
+        dev: 0,
+        ino: 0,
+        nlink: 1,
+        is_symlink: false,
+    )
 
 fn plan_markers(s scan.Scan) Set[str]
     mut known := Set[str]()

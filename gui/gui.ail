@@ -166,7 +166,7 @@ fn scanner(inbox app.Inbox, done Channel[mock.Model], root str)
     s := scan.scan(root) else err
         inbox.post(app.external("scan_failed", "{err}"))
         return
-    floor := (s.total / 3000).max(1048576).min(67108864)
+    floor := (s.total / 3000).max(1).min(67108864)
     mut tree := bridge.tree(s, env.home() else "/", time.now_ms(), floor)
     v := fs.volume(root) else err
         tree.vol_total = 0
