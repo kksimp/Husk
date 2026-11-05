@@ -136,11 +136,12 @@ fn plan_doc(root str, max_bytes int, only_safe bool, allow_protected bool) Json 
 
 fn print_scan(root str, top int) ! fs.IoError
     s := scan.scan(root)?
-    print("{model.human(s.total)} in {s.files.len()} files under {root}")
+    v := fs.volume(root)?
+    print("{model.human(s.total)} in {s.files.len()} files under {root}; {model.human(v.free)} free of {model.human(v.total)}")
     for d in scan.top_dirs(s, top)
         print("{model.human(d.size):>10}  {d.path}")
     if s.errors.len() > 0
-        io.eprint("{s.errors.len()} files could not be read")
+        io.eprint("{s.errors.len()} folders could not be read")
 
 fn print_plan(doc Json)
     items := doc.arr("items") else []
@@ -206,11 +207,11 @@ fn cmd_apply(o Opts) ! fs.IoError | JsonError
         if not o.yes
             print("would trash {model.human(pl.bytes):>10}  {pl.path}")
             continue
-        loc := plan.trash_item(pl.path) else err
-            print("FAILED {pl.path}: {err.text}")
+        plan.trash_item(pl.path) else err
+            print("FAILED {pl.path}: {err}")
             refused += 1
             break
-        print("trashed {pl.path} -> {loc}")
+        print("trashed {pl.path}")
         done.push(pl)
     if o.yes and done.len() > 0
         dir := path.join(home(), ".husk/undo")

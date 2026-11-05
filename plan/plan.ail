@@ -5,7 +5,7 @@
 ##   choose      the best of them within a byte budget
 ##   duplicates  identical files: same size, then the same SHA-256
 ##   revalidate  before apply, the path is re-rated; anything that changed is refused
-##   trash_item  the only way Husk removes anything, and it needs `fs.trash`
+##   trash_item  the only way Husk removes anything: `fs.trash`
 ##
 ## Husk never deletes. Apply moves to the Trash and writes an undo manifest.
 
@@ -127,9 +127,14 @@ pub fn revalidate(pl Planned, home str, now_ms int, rs List[rules.Rule], allow_p
         return "rule changed from {pl.rule} to {v.rule}"
     ""
 
-## Identical files: group by size, then confirm by SHA-256 of the contents.
-## Interim: `fs.read_range` will add a cheap head and tail check before the full
-## hash (docs/ail-requests.md). Files over `cap` bytes are not compared.
+## Identical files: group by size, then by the hash of the first and last 4 KB
+## (`fs.read_range`), then confirm by SHA-256 of the whole file. Files over `cap`
+## bytes are not compared.
+fn edges(p str, size int) str ! fs.IoError
+    head := fs.read_range(p, 0, 4096)?
+    tail := fs.read_range(p, (size - 4096).max(0), 4096)?
+    "{hash.sha256(head)}{hash.sha256(tail)}"
+
 pub fn duplicates(
     s scan.Scan,
     home str,
@@ -146,12 +151,18 @@ pub fn duplicates(
     for size, paths in by_size
         if paths.len() < 2
             continue
-        mut by_hash := {}
+        mut by_edges := {}
         for p in paths
-            by_hash.push(hash.sha256(fs.read_bytes(p)?), p)
-        for h, same in by_hash
-            if same.len() > 1
-                groups.push(same.sorted())
+            by_edges.push(edges(p, size)?, p)
+        for k, cand in by_edges
+            if cand.len() < 2
+                continue
+            mut by_hash := {}
+            for q in cand
+                by_hash.push(hash.sha256(fs.read_bytes(q)?), q)
+            for h, same in by_hash
+                if same.len() > 1
+                    groups.push(same.sorted())
     groups
 
 ## Duplicate groups as items: every copy but the first (by path) is PROBABLY_SAFE.
@@ -170,15 +181,10 @@ pub fn duplicate_items(groups List[List[str]], sizes Map[str, int]) List[model.I
             )))
     out
 
-## Trash one path. Husk's only removal route; it must be `fs.trash`, which moves
-## to the macOS Trash (Put Back works) and gives the new location for the undo
-## manifest. ail has no `fs.trash` yet, so apply refuses to remove anything
-## rather than fall back on `fs.remove` or a rename (docs/ail-requests.md).
-pub fn trash_item(p str) str ! TrashError
-    return TrashError(text: "fs.trash is not in ail yet; nothing was removed: {p}")
-
-pub error struct TrashError "cannot move to the Trash"
-    pub text str
+## Trash one path: Husk's only removal route. `fs.trash` moves it to the macOS
+## Trash, so Put Back works. It never copies or deletes.
+pub fn trash_item(p str) ! fs.IoError
+    fs.trash(p)?
 
 pub fn undo_json(applied List[Planned], created_ms int) Json
     model.document("undo", [
