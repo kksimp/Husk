@@ -1,0 +1,363 @@
+## Husk: find what is using your disk and say what is safe to delete.
+##
+##   ./ail run husk.ail scan [--json] [--top N] [PATH]       biggest folders under PATH (default: home)
+##   ./ail run husk.ail explain [--json] PATH                 SAFE / PROBABLY_SAFE / KEEP for one path, with the reason
+##   ./ail run husk.ail plan [--max-bytes 10G] [--only-safe] [--out plan.json] [PATH]
+##   ./ail run husk.ail dupes [--min-bytes 1M] [PATH]        identical files (same size, then same SHA-256)
+##   ./ail run husk.ail apply plan.json [--yes]               move a plan to the Trash (dry run without --yes)
+##   ./ail run husk.ail serve                                 MCP server on stdio: husk_scan, husk_explain, husk_plan
+##
+## Exit codes: 0 done, 2 usage, 3 an I/O or JSON failure, 4 apply refused something.
+## Every --json document starts with "schema": 1 and a "kind". Husk never deletes:
+## apply uses the Trash only (docs/design.md). Add --allow-protected to let rules
+## look inside Documents, Desktop and other protected folders.
+
+use model
+use plan
+use rules
+use scan
+
+struct Opts
+    json bool
+    top int
+    max_bytes int
+    only_safe bool
+    allow_protected bool
+    yes bool
+    min_bytes int
+    out str
+    words List[str]
+
+error enum UsageError
+    Bad(text str) "{text}"
+
+fn parse_size(s str) int?
+    t := s.trim().to_upper()
+    if t.ends_with("G")
+        return (t.slice(0, t.len() - 1).to_int()?) * 1073741824
+    if t.ends_with("M")
+        return (t.slice(0, t.len() - 1).to_int()?) * 1048576
+    if t.ends_with("K")
+        return (t.slice(0, t.len() - 1).to_int()?) * 1024
+    t.to_int()
+
+fn parse(args List[str]) Opts ! UsageError
+    mut o := Opts(
+        json: false,
+        top: 20,
+        max_bytes: 0,
+        only_safe: false,
+        allow_protected: false,
+        yes: false,
+        min_bytes: 1048576,
+        out: "",
+        words: [],
+    )
+    mut i := 0
+    while i < args.len()
+        a := args[i]
+        i += 1
+        match a
+            "--json" => o.json = true
+            "--only-safe" => o.only_safe = true
+            "--allow-protected" => o.allow_protected = true
+            "--yes" => o.yes = true
+            "--top" | "--max-bytes" | "--min-bytes" | "--out" =>
+                if i >= args.len()
+                    return Bad(text: "{a} needs a value")
+                v := args[i]
+                i += 1
+                match a
+                    "--top" => o.top = v.to_int() else return Bad(text: "--top needs a number")
+                    "--max-bytes" => o.max_bytes = parse_size(v) else return Bad(text: "--max-bytes needs a size like 500M or 10G")
+                    "--min-bytes" => o.min_bytes = parse_size(v) else return Bad(text: "--min-bytes needs a size like 1M")
+                    _ => o.out = v
+            _ =>
+                if a.starts_with("--")
+                    return Bad(text: "unknown option {a}")
+                o.words.push(a)
+    o
+
+fn home() str
+    env.home() else "/"
+
+fn root_of(o Opts) str
+    if o.words.len() > 1 then o.words[1] else home()
+
+fn scan_doc(root str, top int) Json ! fs.IoError
+    s := scan.scan(root)?
+    dirs := scan.top_dirs(s, top)
+    model.document("scan", [
+        model.member("root", Json.Str(root)),
+        model.member("total_bytes", model.jint(s.total)),
+        model.member("files", model.jint(s.files.len())),
+        model.member("errors", model.jint(s.errors.len())),
+        model.member("top", Json.Arr([
+            model.obj([
+                model.member("path", Json.Str(d.path)),
+                model.member("bytes", model.jint(d.size)),
+            ])
+            for d in dirs
+        ])),
+    ])
+
+fn explain_doc(p str, allow_protected bool) Json ! fs.IoError
+    m := fs.metadata(p)?
+    mut known := Set[str]()
+    parent := path.dir(p)
+    for name in fs.list_dir(parent) else []
+        known.add(path.join(parent, name))
+    mut nbytes := m.size
+    if m.is_dir
+        nbytes = scan.scan(p)?.total
+    v := rules.rate(
+        p,
+        m.is_dir,
+        m.modified_ms,
+        home(),
+        time.now_ms(),
+        known,
+        rules.builtin(),
+        allow_protected,
+    )
+    model.document("explain", [
+        model.member("path", Json.Str(p)),
+        model.member("bytes", model.jint(nbytes)),
+        model.member("is_dir", Json.Bool(m.is_dir)),
+        model.member("verdict", model.verdict_json(v)),
+    ])
+
+fn plan_doc(root str, max_bytes int, only_safe bool, allow_protected bool) Json ! fs.IoError
+    s := scan.scan(root)?
+    now := time.now_ms()
+    all := plan.candidates(s, home(), now, rules.builtin(), allow_protected)
+    picked := plan.choose(all, max_bytes, only_safe)
+    plan.plan_json(root, picked, max_bytes, now)
+
+fn print_scan(root str, top int) ! fs.IoError
+    s := scan.scan(root)?
+    v := fs.volume(root)?
+    print("{model.human(s.total)} in {s.files.len()} files under {root}; {model.human(v.free)} free of {model.human(v.total)}")
+    for d in scan.top_dirs(s, top)
+        print("{model.human(d.size):>10}  {d.path}")
+    if s.errors.len() > 0
+        io.eprint("{s.errors.len()} folders could not be read")
+
+fn print_plan(doc Json)
+    items := doc.arr("items") else []
+    for it in items
+        v := it.get("verdict") else Json.Null
+        print("{v.text("rating", ""):<14} {v.int("confidence") else 0:>3}%  {model.human(it.int("bytes") else 0):>10}  {it.text("path", "")}")
+        print("{"":>31}{v.text("reason", "")}")
+    print("{items.len()} items, {model.human(doc.int("total_bytes") else 0)} could be freed")
+
+fn cmd_explain(o Opts) ! fs.IoError
+    if o.words.len() < 2
+        io.eprint("usage: explain [--json] PATH")
+        io.exit(2)
+    doc := explain_doc(o.words[1], o.allow_protected)?
+    if o.json
+        print(doc.to_text())
+        return
+    v := doc.get("verdict") else Json.Null
+    print("{doc.text("path", "")}")
+    print("{model.human(doc.int("bytes") else 0)}  {v.text("rating", "")}  confidence {v.int("confidence") else 0}%  rule {v.text("rule", "")}")
+    print(v.text("reason", ""))
+
+fn cmd_plan(o Opts) ! fs.IoError
+    doc := plan_doc(root_of(o), o.max_bytes, o.only_safe, o.allow_protected)?
+    if o.out != ""
+        fs.write_text(o.out, doc.to_text())?
+    if o.json
+        print(doc.to_text())
+    else
+        print_plan(doc)
+
+fn cmd_dupes(o Opts) ! fs.IoError
+    s := scan.scan(root_of(o))?
+    groups := plan.duplicates(s, home(), o.min_bytes, 1073741824, o.allow_protected)?
+    mut wasted := 0
+    for g in groups
+        size := fs.metadata(g[0])?.size
+        wasted += size * (g.len() - 1)
+        print("{model.human(size)} x {g.len()}")
+        for p in g
+            print("    {p}")
+    print("{groups.len()} groups, {model.human(wasted)} in extra copies")
+
+## Dry run unless --yes. Every path is re-rated first; a changed path is refused.
+fn cmd_apply(o Opts) ! fs.IoError | JsonError
+    if o.words.len() < 2
+        io.eprint("usage: apply PLAN.json [--yes]")
+        io.exit(2)
+    planned := plan.parse_plan(fs.read_text(o.words[1])?)?
+    now := time.now_ms()
+    rs := rules.builtin()
+    mut ok := List[plan.Planned]()
+    mut refused := 0
+    for pl in planned
+        why := plan.revalidate(pl, home(), now, rs, o.allow_protected)
+        if why != ""
+            print("REFUSED {pl.path}: {why}")
+            refused += 1
+        else
+            ok.push(pl)
+    mut done := List[plan.Planned]()
+    for pl in ok
+        if not o.yes
+            print("would trash {model.human(pl.bytes):>10}  {pl.path}")
+            continue
+        plan.trash_item(pl.path) else err
+            print("FAILED {pl.path}: {err}")
+            refused += 1
+            break
+        print("trashed {pl.path}")
+        done.push(pl)
+    if o.yes and done.len() > 0
+        dir := path.join(home(), ".husk/undo")
+        fs.make_dir(dir)?
+        fs.write_text(path.join(dir, "{now}.json"), plan.undo_json(done, now).to_text())?
+    tail := if o.yes then "" else ", dry run (add --yes)"
+    print("{ok.len()} ok, {refused} refused{tail}")
+    if refused > 0
+        io.exit(4)
+
+## MCP tools. apply is deliberately not exposed: deleting needs a person at the CLI.
+fn schema(props List[JsonMember], req List[str]) Json
+    model.obj([
+        model.member("type", Json.Str("object")),
+        model.member("properties", model.obj(props)),
+        model.member("required", Json.Arr([Json.Str(r) for r in req])),
+    ])
+
+fn tool(name str, desc str, s Json) Json
+    model.obj([
+        model.member("name", Json.Str(name)),
+        model.member("description", Json.Str(desc)),
+        model.member("inputSchema", s),
+    ])
+
+fn tools_json() str
+    path_prop := model.member("path", model.obj([model.member("type", Json.Str("string"))]))
+    int_prop := model.obj([model.member("type", Json.Str("integer"))])
+    Json
+        .Arr([
+            tool(
+                "husk_scan",
+                "Total the folders under a path and list the biggest. Returns schema-1 JSON.",
+                schema([path_prop, model.member("top", int_prop)], ["path"]),
+            ),
+            tool(
+                "husk_explain",
+                "Rate one path SAFE, PROBABLY_SAFE or KEEP with a reason and confidence.",
+                schema([path_prop], ["path"]),
+            ),
+            tool(
+                "husk_plan",
+                "List what could be deleted within max_bytes, safest first. Does not delete.",
+                schema([path_prop, model.member("max_bytes", int_prop)], ["path"]),
+            ),
+        ])
+        .to_text()
+
+fn call_tool(name str, args Json) str ! fs.IoError | UsageError
+    p := args.text("path", "")
+    if p == ""
+        return Bad(text: "{name} needs a path")
+    match name
+        "husk_scan" => scan_doc(p, args.int("top") else 20)?.to_text()
+        "husk_explain" => explain_doc(p, false)?.to_text()
+        "husk_plan" => plan_doc(p, args.int("max_bytes") else 0, false, false)?.to_text()
+        _ => return Bad(text: "unknown tool {name}")
+
+fn reply(id str, body str)
+    print("\{\"jsonrpc\": \"2.0\", \"id\": {id}, {body}}")
+
+fn cmd_serve()
+    while true
+        line := io.read_line() else break
+        if line.trim() == ""
+            continue
+        msg := parse_json(line) else err
+            reply("null", "\"error\": \{\"code\": -32700, \"message\": \"parse error\"}")
+            continue
+        id := (msg.get("id") else Json.Null).to_text()
+        if id == "null"
+            continue
+        match msg.text("method", "")
+            "initialize" => reply(
+                id,
+                "\"result\": \{\"protocolVersion\": \"2024-11-05\", \"capabilities\": \{\"tools\": \{}}, \"serverInfo\": \{\"name\": \"husk\", \"version\": \"0.1\"}}",
+            )
+            "tools/list" => reply(id, "\"result\": \{\"tools\": {tools_json()}}")
+            "tools/call" =>
+                params := msg.get("params") else Json.Obj([])
+                args := params.get("arguments") else Json.Obj([])
+                out := call_tool(params.text("name", ""), args) else err
+                    reply(
+                        id,
+                        "\"result\": \{\"content\": [\{\"type\": \"text\", \"text\": {Json.Str("{err}").to_text()}}], \"isError\": true}",
+                    )
+                    continue
+                reply(
+                    id,
+                    "\"result\": \{\"content\": [\{\"type\": \"text\", \"text\": {Json.Str(out).to_text()}}], \"isError\": false}",
+                )
+            "ping" => reply(id, "\"result\": \{}")
+            _ => reply(id, "\"error\": \{\"code\": -32601, \"message\": \"method not found\"}")
+
+fn usage()
+    io.eprint("usage: husk scan|explain|plan|dupes|apply|serve ... (see the header of husk.ail)")
+    io.exit(2)
+
+fn main()
+    o := parse(env.args()) else err
+        io.eprint("{err}")
+        usage()
+        return
+    if o.words.len() == 0
+        usage()
+        return
+    cmd := o.words[0]
+    if cmd == "serve"
+        cmd_serve()
+        return
+    if cmd == "scan"
+        if o.json
+            doc := scan_doc(root_of(o), o.top) else err
+                io.eprint("{err}")
+                io.exit(3)
+                return
+            print(doc.to_text())
+        else
+            print_scan(root_of(o), o.top) else err
+                io.eprint("{err}")
+                io.exit(3)
+        return
+    match cmd
+        "explain" => cmd_explain(o) else err
+            io.eprint("{err}")
+            io.exit(3)
+        "plan" => cmd_plan(o) else err
+            io.eprint("{err}")
+            io.exit(3)
+        "dupes" => cmd_dupes(o) else err
+            io.eprint("{err}")
+            io.exit(3)
+        "apply" => cmd_apply(o) else err
+            io.eprint("{err}")
+            io.exit(3)
+        _ => usage()
+
+@test fn sizes_parse()
+    assert_eq(parse_size("500M"), 524288000)
+    assert_eq(parse_size("2g"), 2147483648)
+    assert(parse_size("x") == none)
+
+@test fn options_parse()
+    o := parse(["plan", "--max-bytes", "1K", "--only-safe", "/tmp"]) else
+        assert(false)
+        return
+    assert_eq(o.max_bytes, 1024)
+    assert(o.only_safe)
+    assert_eq(o.words, ["plan", "/tmp"])

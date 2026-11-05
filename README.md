@@ -1,12 +1,14 @@
 # Husk
 
-Husk finds what is taking up disk space on your Mac and tells you what is safe to delete, and why. It is written entirely in [AIL](https://github.com/kksimp/ail).
+A fast disk-space analyzer for macOS written in [AIL](https://github.com/kksimp/ail). It totals every folder, then says what is safe to delete and why. Husk only moves things to the Trash.
 
-- **Fast:** one bulk scan (`fs.scan`), parallel across folders.
-- **Smart:** every item is rated SAFE, PROBABLY SAFE or KEEP with a plain reason.
-- **Safe:** deletes only go to the Trash (`fs.trash`), and every apply writes an undo manifest.
-- **AI-first:** `husk scan --json`, `husk explain PATH`, `husk plan`, `husk apply`.
+```sh
+./ail run husk.ail scan --top 15 ~            # biggest folders
+./ail run husk.ail explain ~/Library/Caches/Homebrew
+./ail run husk.ail plan --max-bytes 20G --out plan.json
+./ail run husk.ail apply plan.json            # dry run; --yes to trash
+./ail run husk.ail dupes --min-bytes 10M ~/Downloads
+./ail run husk.ail serve                      # MCP: husk_scan, husk_explain, husk_plan
+```
 
-Status: early development. Pinned AIL commit goes in `.ail-version`.
-
-License: AGPL-3.0 (see `LICENSE`). Private repository.
+Agents: add `--json` (schema 1, stable exit codes). See [docs/design.md](docs/design.md). Features still needed in ail: [docs/ail-requests.md](docs/ail-requests.md). Licence: AGPL-3.0.

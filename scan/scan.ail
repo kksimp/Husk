@@ -1,0 +1,84 @@
+## Husk's scanner: walk a tree and total every directory.
+##
+## One `fs.scan` pass (ADR 0927): bytes on disk, hard links counted once, symlinks not
+## followed, unreadable folders reported in `errors`.
+
+use model
+
+pub struct Scan
+    pub root str
+    pub files List[model.Entry]
+    pub dirs Map[str, int]
+    pub total int
+    pub errors List[str]
+
+fn parent(p str) str
+    path.dir(p)
+
+## Add `n` bytes to every directory from `p`'s parent up to `root`.
+fn credit(mut dirs Map[str, int], root str, p str, n int)
+    mut d := parent(p)
+    while d.len() >= root.len() and d.starts_with(root)
+        dirs[d] += n
+        next := parent(d)
+        if next == d
+            break
+        d = next
+
+## Hard-linked files share an inode: count the first, skip the rest.
+fn link_key(e model.Entry) str
+    "{e.dev}:{e.ino}"
+
+pub fn scan(root str) Scan ! fs.IoError
+    raw := fs.scan(root, true)?
+    mut files := List[model.Entry]()
+    mut dirs := Map[str, int]()
+    mut seen := Set[str]()
+    mut total := 0
+    for r in raw.entries
+        if r.is_dir
+            continue
+        e := model.Entry(
+            path: r.path,
+            size: r.size,
+            alloc: r.alloc,
+            mtime_ms: r.modified_ms,
+            is_dir: false,
+            dev: r.device,
+            ino: r.inode,
+            nlink: r.links,
+            is_symlink: r.is_link,
+        )
+        files.push(e)
+        if e.nlink > 1 and not seen.add(link_key(e))
+            continue
+        credit(mut dirs, root, e.path, e.bytes())
+        total += e.bytes()
+    Scan(root: root, files: files, dirs: dirs, total: total, errors: raw.skipped)
+
+## The `n` biggest directories below the root.
+pub fn top_dirs(s Scan, n int) List[model.Entry]
+    mut out := List[model.Entry]()
+    for d, b in s.dirs
+        if d == s.root
+            continue
+        out.push(model.Entry(
+            path: d,
+            size: b,
+            alloc: 0,
+            mtime_ms: 0,
+            is_dir: true,
+            dev: 0,
+            ino: 0,
+            nlink: 1,
+            is_symlink: false,
+        ))
+    out.sorted(by: |e| -e.size).take(n)
+
+@test fn credit_totals_ancestors()
+    mut dirs := Map[str, int]()
+    credit(mut dirs, "/r", "/r/a/b/f.txt", 10)
+    credit(mut dirs, "/r", "/r/a/g.txt", 5)
+    assert_eq(dirs["/r"], 15)
+    assert_eq(dirs["/r/a"], 15)
+    assert_eq(dirs["/r/a/b"], 10)
