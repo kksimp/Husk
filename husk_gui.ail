@@ -1,14 +1,21 @@
-## Husk: finds what is using your disk and says what is safe to delete.
+## Husk's window: finds what is using your disk and says what is safe to delete.
 ## This file is the std.app shell: it owns the `State` (view/view.ail) and turns
-## events into changes. Run on macOS with `tools/app-host/macos/run.sh` from the
-## ail checkout: `run.sh path/to/husk/husk.ail`.
+## events into changes. Run on macOS from the ail checkout:
+##   tools/app-host/macos/run.sh path/to/husk/husk_gui.ail [FOLDER]
+## FOLDER defaults to your home folder. The scan runs in a task, so the window
+## opens at once with a progress bar and fills in when the scan is done.
 
 use std.app
 use mock
 use view
+use bridge
+use plan
+use scan
 
 struct Husk
     s view.State
+    ## Where the scan task leaves the finished tree.
+    done Channel[mock.Model]
 
 impl app.App for Husk
     fn update(mut self, ev app.Event)
@@ -21,7 +28,9 @@ impl app.App for Husk
                 s.top = (s.top + ev.dy).max(0.0).min(view.max_scroll(s))
             "click" if ev.id == "main" and ev.text == "left" => click(ev.x, ev.y)
             "key" => key(ev.text)
-            "external" if ev.id == "scan" => scan(ev.text)
+            "external" if ev.id == "scan" => progress(ev.text)
+            "external" if ev.id == "scan_done" => finished()
+            "external" if ev.id == "scan_failed" => failed(ev.text)
             _ => return
 
     fn view(self) app.Node
@@ -32,12 +41,29 @@ impl app.App for Husk
         "Husk"
 
 ## A scan update from the scanner: `pct|files|path`.
-fn Husk.scan(mut self, text str)
+fn Husk.progress(mut self, text str)
     parts := text.split("|")
     if parts.len() < 3
         return
     s.pct = (parts[0].to_float() else 1.0).max(0.0).min(1.0)
     s.scan_note = "{parts[1]} files · {parts[2]}"
+
+## The scan task is done: take its tree.
+fn Husk.finished(mut self)
+    m := done.recv() else return
+    s.m = m
+    s.gone = {}
+    s.marks = {}
+    s.eff = mock.sizes(m, s.gone)
+    s.cur = 0
+    s.sel = -1
+    s.pct = 1.0
+    s.scan_note = ""
+    s.notice = ""
+
+fn Husk.failed(mut self, text str)
+    s.pct = 1.0
+    s.notice = "Scan failed: {text}"
 
 fn Husk.go(mut self, id int)
     s.cur = id
@@ -84,14 +110,29 @@ fn Husk.click(mut self, x float, y float)
         "undo" => undo()
         _ => return
 
-## Moves the marked entries to the Trash. The model only hides them here;
-## the real move is `fs.trash` (a std feature the core lane adds), after which
-## `eff` comes from the next scan.
+## Moves the marked entries to the Trash with `plan.trash_item` (it becomes
+## `fs.trash`, ADR 0929). A real entry that fails stays; the footer says why.
+## Mock entries (no path) are only hidden, and Undo shows them again.
 fn Husk.trash(mut self)
     ids := mock.top_marks(s.m, s.marks)
+    mut moved := List[int]()
+    mut why := ""
+    mut real := false
     for id in ids
+        p := s.m.entries[id].path
+        if p != ""
+            real = true
+            plan.trash_item(p) else err
+                why = "{err}"
+                continue
         s.gone.add(id)
-    s.undo = ids
+        moved.push(id)
+    s.undo = List[int]()
+    s.notice = why
+    if not real
+        s.undo = moved
+    elif why == ""
+        s.notice = "Moved {moved.len()} items to the Trash. Use Put Back in Finder to restore them."
     s.marks = {}
     s.sheet = false
     s.sel = -1
@@ -113,11 +154,37 @@ fn Husk.key(mut self, name str)
         go(s.m.entries[s.cur].parent)
 
 fn fresh() Husk
-    Husk(s: view.State.new(mock.mock()))
+    Husk(s: view.State.new(mock.mock()), done: Channel[mock.Model](1))
+
+## A one-folder tree to show while the scan runs.
+fn placeholder(root str) mock.Model
+    mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0)
+    mock.add(mut m, -1, root, 1, true, "keep", "Scanning…", "", "")
+    m
+
+## The scan task: scan `root`, hand the tree over, tell the window.
+fn scanner(inbox app.Inbox, done Channel[mock.Model], root str)
+    inbox.post(app.external("scan", "0.0|0|{root}"))
+    s := scan.scan(root) else err
+        inbox.post(app.external("scan_failed", "{err}"))
+        return
+    floor := (s.total / 3000).max(1048576).min(67108864)
+    done.send(bridge.tree(s, env.home() else "/", time.now_ms(), floor))
+    inbox.post(app.external("scan_done", ""))
 
 fn main()
-    mut h := fresh()
-    app.run(mut h) else err
+    root := env.args().get(0) else (env.home() else "/")
+    done := Channel[mock.Model](1)
+    mut h := Husk(s: view.State.new(placeholder(root)), done: done)
+    h.s.pct = 0.02
+    h.s.scan_note = root
+    inbox := app.new_inbox()
+    g := TaskGroup()
+    g.add(spawn scanner(inbox, done, root))
+    host := app.host_path() else err
+        print("no window: {err.kind}: {err.message}")
+        return
+    app.run_with(mut h, host, [], inbox) else err
         print("no window: {err.kind}: {err.message}")
 
 @test fn starts_on_the_overview()

@@ -26,6 +26,8 @@ pub struct State
     ## Scan progress 0 to 1; below 1 the toolbar shows a progress bar.
     pub pct float
     pub scan_note str
+    ## A line for the footer, such as why a move to the Trash failed.
+    pub notice str
 
 ## A rectangle that reacts to a click. `kind` says what; `k` is an entry id or
 ## index, `arg` a filter or sort key.
@@ -67,21 +69,50 @@ pub fn State.new(m mock.Model) State
         h: 720.0,
         pct: 1.0,
         scan_note: "",
+        notice: "",
     )
 
 ## The ids the list and treemap show, in the order the user sorted them.
 pub fn State.shown(self) List[int]
     ids := mock.rows(m, cur, filter, eff)
+    mut keys := List[int]()
     if sort_key == "name"
-        by := ids.sorted(by: |i| m.entries[i].name.to_lower())
-        return if desc then by.reversed() else by
-    key := |i int| if sort_key == "safety" then rank(m.entries[i].safety) * 1000000000000 - eff[i] else -eff[i]
-    by := ids.sorted(by: key)
-    if sort_key == "size" and not desc
-        return by.reversed()
-    if sort_key == "safety" and desc
-        return by.reversed()
+        mut names := List[str]()
+        for i in ids
+            names.push(m.entries[i].name.to_lower())
+        ranked := names.sorted()
+        for n in names
+            keys.push(ranked.index_of(n) else 0)
+    else
+        for i in ids
+            big := FAR - eff[i].min(FAR - 1)
+            keys.push(if sort_key == "safety" then rank(m.entries[i].safety) * FAR + big else big)
+    by := order(keys, ids)
+    if (sort_key == "size" and not desc) or (sort_key == "safety" and desc) or (sort_key == "name" and desc)
+        return flip(by)
     by
+
+## Bytes (and ranks) are packed below this so `order` can sort plain ints.
+FAR := 1099511627776
+SLOT := 1048576
+
+## `ids` sorted by `keys` (each below 2^42), ties by id; both lists line up.
+fn order(keys List[int], ids List[int]) List[int]
+    mut packed := List[int]()
+    for n in 0..ids.len()
+        packed.push(keys[n] * SLOT + ids[n])
+    mut out := List[int]()
+    for c in packed.sorted()
+        out.push(c % SLOT)
+    out
+
+fn flip(xs List[int]) List[int]
+    mut out := List[int]()
+    mut i := xs.len() - 1
+    while i >= 0
+        out.push(xs[i])
+        i -= 1
+    out
 
 fn rank(s str) int
     if s == "safe"
@@ -141,6 +172,13 @@ fn sidebar(s State, mut ops List[app.Op], mut regs List[Region])
     # The volume card.
     ops.push(look.text(20.0, 82.0, "Macintosh HD", look.TEXT, 12.0, true))
     bw := SIDE_W - 40.0
+    if s.m.vol_total <= 0
+        # No volume numbers (fs.volume, ADR 0928): show what the scan found.
+        ops.push(look.text(20.0, 104.0, "{mock.fmt_size(s.eff[0])} scanned", look.TEXT, 12.0, false))
+        if s.reclaim() > 0
+            ops.push(look.text(20.0, 124.0, "{mock.fmt_size(s.reclaim())} can be freed", look.SAFE, 11.0, false))
+        sidebar_nav(s, mut ops, mut regs)
+        return
     look.round(mut ops, 20.0, 104.0, bw, 8.0, 4.0, look.mix(look.SIDE, 0xffffff, 0.12), look.SIDE)
     used := s.m.vol_used.to_float() / s.m.vol_total.to_float()
     uw := bw * used
@@ -153,7 +191,9 @@ fn sidebar(s State, mut ops List[app.Op], mut regs List[Region])
     ops.push(look.text(20.0, 136.0, "{mock.fmt_size(free)} free", look.TEXT, 11.0, false))
     if s.reclaim() > 0
         ops.push(look.text(20.0, 152.0, "{mock.fmt_size(free + s.reclaim())} free after cleanup", look.SAFE, 11.0, false))
-    # Views.
+    sidebar_nav(s, mut ops, mut regs)
+
+fn sidebar_nav(s State, mut ops List[app.Op], mut regs List[Region])
     mut y := 184.0
     items := [("", "Overview", "{mock.fmt_size(s.eff[0])}"), ("safe", "Safe to delete", "{mock.fmt_size(mock.filter_total(s.m, "safe", s.eff))}")]
     y = nav_row(s, mut ops, mut regs, y, items[0].0, items[0].1, items[0].2)
@@ -208,10 +248,10 @@ fn treemap_view(s State, ids List[int], mut ops List[app.Op], mut regs List[Regi
     if ids.is_empty()
         ops.push(look.text(x + w / 2.0 - 60.0, y + h / 2.0 - 8.0, "Nothing here", look.DIM, 13.0, false))
         return
-    boxes := treemap.layout([s.eff[i] for i in s.sorted_by_size(ids)], x, y, w, h)
-    order := s.sorted_by_size(ids)
+    ranked := s.sorted_by_size(ids)
+    boxes := treemap.layout([s.eff[i] for i in ranked], x, y, w, h)
     for n, b in boxes.enumerate()
-        id := order[n]
+        id := ranked[n]
         e := s.m.entries[id]
         c := look.safety_color(e.safety)
         shade := 0.34 + 0.05 * (n % 3).to_float()
@@ -228,7 +268,10 @@ fn treemap_view(s State, ids List[int], mut ops List[app.Op], mut regs List[Regi
 
 ## Ids by size, largest first, for the treemap.
 fn State.sorted_by_size(self, ids List[int]) List[int]
-    ids.sorted(by: |i| -eff[i])
+    mut keys := List[int]()
+    for i in ids
+        keys.push(FAR - eff[i].min(FAR - 1))
+    order(keys, ids)
 
 ## The sortable list under the treemap.
 fn list_view(s State, ids List[int], mut ops List[app.Op], mut regs List[Region], y float, bottom float)
@@ -250,7 +293,10 @@ fn list_view(s State, ids List[int], mut ops List[app.Op], mut regs List[Region]
     top := y + HEAD_H
     rect(mut ops, x0, top, avail, bottom - top, look.BG)
     ops.push(app.Op.Clip(x: x0, y: top, w: avail, h: bottom - top))
-    biggest := (ids.map(|i| s.eff[i]).max() else 1).to_float().max(1.0)
+    mut big := 1
+    for i in ids
+        big = big.max(s.eff[i])
+    biggest := big.to_float()
     for n, id in ids.enumerate()
         ry := top + n.to_float() * ROW_H - s.top
         if ry + ROW_H < top or ry > bottom
@@ -291,7 +337,10 @@ fn detail(s State, mut ops List[app.Op], y float)
         ops.push(look.text(x0 + 16.0, y + 24.0, "Select an item to see why Husk suggests keeping or deleting it.", look.DIM, 12.0, false))
         return
     e := s.m.entries[s.sel]
-    path := mock.trail(s.m, s.sel).map(|i| s.m.entries[i].name).join(" / ")
+    mut names := List[str]()
+    for i in mock.trail(s.m, s.sel)
+        names.push(s.m.entries[i].name)
+    path := names.join(" / ")
     ops.push(look.text(x0 + 16.0, y + 10.0, e.name, look.TEXT, 13.0, true))
     badge(mut ops, x0 + 24.0 + look.width(e.name, 13.0), y + 8.0, e.safety, look.PANEL)
     ops.push(look.text(x0 + 16.0, y + 30.0, look.fit(e.reason, s.w - x0 - 32.0, 12.0), look.TEXT, 12.0, false))
@@ -307,6 +356,8 @@ fn footer(s State, mut ops List[app.Op], mut regs List[Region], y float)
     if not s.undo.is_empty()
         ops.push(look.text(x0 + 16.0, y + 19.0, "Moved {s.undo.len()} items to the Trash", look.SAFE, 12.0, true))
         button(mut ops, mut regs, x0 + 220.0, y + 13.0, 70.0, "Undo", false, look.SIDE, "undo")
+    elif s.notice != ""
+        ops.push(look.text(x0 + 16.0, y + 19.0, look.fit(s.notice, s.w - x0 - 380.0, 12.0), look.REVIEW, 12.0, true))
     elif n > 0
         ops.push(look.text(x0 + 16.0, y + 19.0, "{n} selected · {mock.fmt_size(s.reclaim())} can be freed", look.TEXT, 12.0, true))
     else

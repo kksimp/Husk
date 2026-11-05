@@ -15,6 +15,8 @@ pub struct Entry
     pub parent int
     pub kids List[int]
     pub age str
+    ## The real path; empty for the mock tree.
+    pub path str
 
 pub struct Model
     pub entries List[Entry]
@@ -35,7 +37,7 @@ pub CATS := [
 GB := 1073741824
 MB := 1048576
 
-fn add(mut m Model, parent int, name str, size int, is_dir bool, safety str, reason str, cat str, age str) int
+pub fn add(mut m Model, parent int, name str, size int, is_dir bool, safety str, reason str, cat str, age str) int
     id := m.entries.len()
     m.entries.push(Entry(
         name: name,
@@ -47,6 +49,7 @@ fn add(mut m Model, parent int, name str, size int, is_dir bool, safety str, rea
         parent: parent,
         kids: [],
         age: age,
+        path: "",
     ))
     if parent >= 0
         m.entries[parent].kids.push(id)
@@ -93,24 +96,37 @@ pub fn mock() Model
     add(mut m, ap, "Final Cut Pro.app", 5 * GB + 200 * MB, true, "review", "Not opened in over a year", "apps", "18 months ago")
     add(mut m, root, "System", 28 * GB, true, "keep", "macOS itself", "", "")
     add(mut m, root, "private/var/vm", 6 * GB, true, "keep", "Swap and sleep image; macOS manages it", "", "")
+    finish(mut m)
     m
 
-## Each entry's size with trashed entries (`gone`) removed. A folder with
-## children is the sum of its children; parents come before children, so one
-## backward pass is enough.
-pub fn sizes(m Model, gone Set[int]) List[int]
-    mut out := [e.size for e in m.entries]
+## Gives every folder with children the sum of its children's sizes.
+pub fn finish(mut m Model)
     mut i := m.entries.len() - 1
     while i >= 0
-        e := m.entries[i]
-        if gone.contains(i)
-            out[i] = 0
-        elif not e.kids.is_empty()
-            mut s := 0
-            for k in e.kids
-                s += out[k]
-            out[i] = s
+        if not m.entries[i].kids.is_empty()
+            mut t := 0
+            for k in m.entries[i].kids
+                t += m.entries[k].size
+            m.entries[i].size = t
         i -= 1
+
+## Each entry's size with trashed entries (`gone`) removed: a trashed entry
+## counts 0 and its size comes off every folder above it. A folder's size is
+## its scanned total, which may be more than its listed children.
+pub fn sizes(m Model, gone Set[int]) List[int]
+    mut out := [e.size for e in m.entries]
+    for g in 0..m.entries.len()
+        if not gone.contains(g)
+            continue
+        if g > 0 and covered(m, m.entries[g].parent, gone)
+            out[g] = 0
+            continue
+        amount := m.entries[g].size
+        mut cur := m.entries[g].parent
+        while cur >= 0
+            out[cur] -= amount
+            cur = m.entries[cur].parent
+        out[g] = 0
     out
 
 ## Is `id` under (or equal to) an entry in `marks`?
@@ -144,8 +160,8 @@ pub fn rows(m Model, cur int, filter str, eff List[int]) List[int]
         e := m.entries[id]
         if eff[id] <= 0
             continue
-        par := m.entries[e.parent]
-        hit := if filter == "safe" then e.safety == "safe" and par.safety != "safe" else e.cat == filter and par.cat != filter
+        pe := m.entries[e.parent]
+        hit := if filter == "safe" then e.safety == "safe" and pe.safety != "safe" else e.cat == filter and pe.cat != filter
         if hit
             out.push(id)
     out
