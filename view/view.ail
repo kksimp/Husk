@@ -403,7 +403,7 @@ fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
 ## The whole frame for a window of `s.w` by `s.h`.
 pub fn draw(s State) Frame
     mut ops := [app.draw_rect(0.0, 0.0, s.w, s.h, look.BG)]
-    mut regs := []
+    mut regs := List[Region]()
     ids := s.shown()
     x0 := SIDE_W
     foot_y := s.h - FOOT_H

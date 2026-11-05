@@ -6,12 +6,14 @@
 ##   ./ail run husk.ail dupes [--min-bytes 1M] [PATH]        identical files (same size, then same SHA-256)
 ##   ./ail run husk.ail apply plan.json [--yes]               move a plan to the Trash (dry run without --yes)
 ##   ./ail run husk.ail serve                                 MCP server on stdio: husk_scan, husk_explain, husk_plan
+##   ./ail run husk.ail gui [PATH]                           the window (macOS: tools/app-host/macos/run.sh husk.ail gui)
 ##
 ## Exit codes: 0 done, 2 usage, 3 an I/O or JSON failure, 4 apply refused something.
 ## Every --json document starts with "schema": 1 and a "kind". Husk never deletes:
 ## apply uses the Trash only (docs/design.md). Add --allow-protected to let rules
 ## look inside Documents, Desktop and other protected folders.
 
+use gui
 use model
 use plan
 use rules
@@ -320,6 +322,9 @@ fn main()
     cmd := o.words[0]
     if cmd == "serve"
         cmd_serve()
+        return
+    if cmd == "gui"
+        gui.run(root_of(o))
         return
     if cmd == "scan"
         if o.json

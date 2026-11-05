@@ -18,7 +18,7 @@ fn worst(sum float, big float, small float, side float) float
 ## rectangle's.
 pub fn layout(sizes List[int], x float, y float, w float, h float) List[Box]
     n := sizes.len()
-    mut out := []
+    mut out := List[Box]()
     if n == 0
         return out
     mut total := 0.0

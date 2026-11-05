@@ -1,6 +1,6 @@
 # Husk GUI
 
-One `std.app` canvas (`husk_gui.ail`, `view/view.ail`), Safari-style dark like Garlic.
+One `std.app` canvas (`husk.ail gui`, `view/view.ail`), Safari-style dark like Garlic.
 
 - **Sidebar:** volume usage bar (green slice = what the current selection would free), Overview, Safe to delete, categories with sizes.
 - **Toolbar:** clickable breadcrumb; scan progress bar while `pct < 1` (fed by `external` events `scan` with `pct|files|path`), else Rescan.

@@ -140,7 +140,7 @@ pub fn covered(m Model, id int, marks Set[int]) bool
 
 ## The marked entries that count: those with no marked ancestor.
 pub fn top_marks(m Model, marks Set[int]) List[int]
-    mut out := []
+    mut out := List[int]()
     for id in 0..m.entries.len()
         if marks.contains(id) and not covered(m, m.entries[id].parent, marks)
             out.push(id)
@@ -150,7 +150,7 @@ pub fn top_marks(m Model, marks Set[int]) List[int]
 ## `safe` (every safe entry whose parent is not safe) or a category id (the
 ## top-most entries of that category).
 pub fn rows(m Model, cur int, filter str, eff List[int]) List[int]
-    mut out := []
+    mut out := List[int]()
     if filter == ""
         for k in m.entries[cur].kids
             if eff[k] > 0
@@ -175,7 +175,7 @@ pub fn filter_total(m Model, filter str, eff List[int]) int
 
 ## The path of `id`, root first.
 pub fn trail(m Model, id int) List[int]
-    mut out := []
+    mut out := List[int]()
     mut cur := id
     while cur >= 0
         out.insert(0, cur)

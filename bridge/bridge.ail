@@ -62,7 +62,7 @@ pub fn tree(s scan.Scan, home str, now_ms int, min_bytes int) mock.Model
     # A parent path is a prefix of its children's, so it sorts first.
     for p in order.sorted()
         is_file := files.contains(p)
-        size := if is_file then (files.get(p) else files_zero()).bytes() else s.dirs.get(p) else 0
+        size := if is_file then (files.get(p) else files_zero()).bytes() else (s.dirs.get(p) else 0)
         mtime := if is_file then (files.get(p) else files_zero()).mtime_ms else 0
         v := rules.rate(p, not is_file, mtime, home, now_ms, known, rs, false)
         parent := at.get(path.dir(p)) else -1

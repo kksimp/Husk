@@ -1,7 +1,7 @@
 ## Husk's window: finds what is using your disk and says what is safe to delete.
 ## This file is the std.app shell: it owns the `State` (view/view.ail) and turns
 ## events into changes. Run on macOS from the ail checkout:
-##   tools/app-host/macos/run.sh path/to/husk/husk_gui.ail [FOLDER]
+##   tools/app-host/macos/run.sh path/to/husk/husk.ail gui [FOLDER]
 ## FOLDER defaults to your home folder. The scan runs in a task, so the window
 ## opens at once with a progress bar and fills in when the scan is done.
 
@@ -178,8 +178,8 @@ fn scanner(inbox app.Inbox, done Channel[mock.Model], root str)
     done.send(tree)
     inbox.post(app.external("scan_done", ""))
 
-fn main()
-    root := env.args().get(0) else (env.home() else "/")
+## Opens the window on `root`.
+pub fn run(root str)
     done := Channel[mock.Model](1)
     mut h := Husk(s: view.State.new(placeholder(root)), done: done)
     h.s.pct = 0.02
