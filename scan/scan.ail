@@ -1,8 +1,7 @@
 ## Husk's scanner: walk a tree and total every directory.
 ##
-## Prototype on `fs.walk` + `fs.metadata` (one stat per file). Hard-link dedup
-## (device + inode, counted once) and bytes-on-disk need `fs.scan`; the code is
-## in place and starts working when its model.Entry fields are filled (docs/ail-requests.md).
+## One `fs.scan` pass (ADR 0927): bytes on disk, hard links counted once, symlinks not
+## followed, unreadable folders reported in `errors`.
 
 use model
 
@@ -31,33 +30,31 @@ fn link_key(e model.Entry) str
     "{e.dev}:{e.ino}"
 
 pub fn scan(root str) Scan ! fs.IoError
-    names := fs.walk(root)?
+    raw := fs.scan(root, true)?
     mut files := List[model.Entry]()
     mut dirs := Map[str, int]()
-    mut errors := List[str]()
     mut seen := Set[str]()
     mut total := 0
-    for p in names
-        m := fs.metadata(p) else err
-            errors.push("{p}: {err}")
+    for r in raw.entries
+        if r.is_dir
             continue
         e := model.Entry(
-            path: p,
-            size: m.size,
-            alloc: 0,
-            mtime_ms: m.modified_ms,
+            path: r.path,
+            size: r.size,
+            alloc: r.alloc,
+            mtime_ms: r.modified_ms,
             is_dir: false,
-            dev: 0,
-            ino: 0,
-            nlink: 1,
-            is_symlink: false,
+            dev: r.device,
+            ino: r.inode,
+            nlink: r.links,
+            is_symlink: r.is_link,
         )
         files.push(e)
         if e.nlink > 1 and not seen.add(link_key(e))
             continue
-        credit(mut dirs, root, p, e.bytes())
+        credit(mut dirs, root, e.path, e.bytes())
         total += e.bytes()
-    Scan(root: root, files: files, dirs: dirs, total: total, errors: errors)
+    Scan(root: root, files: files, dirs: dirs, total: total, errors: raw.skipped)
 
 ## The `n` biggest directories below the root.
 pub fn top_dirs(s Scan, n int) List[model.Entry]
