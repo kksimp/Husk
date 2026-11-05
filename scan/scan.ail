@@ -1,0 +1,87 @@
+## Husk's scanner: walk a tree and total every directory.
+##
+## Prototype on `fs.walk` + `fs.metadata` (one stat per file). Hard-link dedup
+## (device + inode, counted once) and bytes-on-disk need `fs.scan`; the code is
+## in place and starts working when its model.Entry fields are filled (docs/ail-requests.md).
+
+use model
+
+pub struct Scan
+    pub root str
+    pub files List[model.Entry]
+    pub dirs Map[str, int]
+    pub total int
+    pub errors List[str]
+
+fn parent(p str) str
+    path.dir(p)
+
+## Add `n` bytes to every directory from `p`'s parent up to `root`.
+fn credit(mut dirs Map[str, int], root str, p str, n int)
+    mut d := parent(p)
+    while d.len() >= root.len() && d.starts_with(root)
+        dirs[d] += n
+        next := parent(d)
+        if next == d
+            break
+        d = next
+
+## Hard-linked files share an inode: count the first, skip the rest.
+fn link_key(e model.Entry) str
+    "{e.dev}:{e.ino}"
+
+pub fn scan(root str) Scan ! fs.IoError
+    names := fs.walk(root)?
+    mut files := List[model.Entry]()
+    mut dirs := Map[str, int]()
+    mut errors := List[str]()
+    mut seen := Set[str]()
+    mut total := 0
+    for p in names
+        m := fs.metadata(p) else err
+            errors.push("{p}: {err}")
+            continue
+        e := model.Entry(
+            path: p,
+            size: m.size,
+            alloc: 0,
+            mtime_ms: m.modified_ms,
+            is_dir: false,
+            dev: 0,
+            ino: 0,
+            nlink: 1,
+            is_symlink: false,
+        )
+        files.push(e)
+        if e.nlink > 1 && !seen.add(link_key(e))
+            continue
+        credit(mut dirs, root, p, e.bytes())
+        total += e.bytes()
+    Scan(root: root, files: files, dirs: dirs, total: total, errors: errors)
+
+## The `n` biggest directories below the root.
+pub fn top_dirs(s Scan, n int) List[model.Entry]
+    mut out := List[model.Entry]()
+    for d, b in s.dirs
+        if d == s.root
+            continue
+        out.push(model.Entry(
+            path: d,
+            size: b,
+            alloc: 0,
+            mtime_ms: 0,
+            is_dir: true,
+            dev: 0,
+            ino: 0,
+            nlink: 1,
+            is_symlink: false,
+        ))
+    out.sorted(by: |e| -e.size).take(n)
+
+@test fn credit_totals_ancestors()
+    mut dirs := Map[str, int]()
+    credit(mut dirs, "/r", "/r/a/b/f.txt", 10)
+    credit(mut dirs, "/r", "/r/a/g.txt", 5)
+    assert_eq(dirs["/r"], 15)
+    assert_eq(dirs["/r/a"], 15)
+    assert_eq(dirs["/r/a/b"], 10)

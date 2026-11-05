@@ -1,0 +1,130 @@
+## Husk's data model: what a scan sees (Entry), how a rule judges it (Rating,
+## Verdict) and the JSON every command prints. The GUI and the CLI both build on
+## this module, so nothing here prints or reads the disk.
+
+pub enum Rating
+    pub Safe
+    pub Probably
+    pub Keep
+
+pub fn Rating.name(self) str
+    match self
+        Safe => "SAFE"
+        Probably => "PROBABLY_SAFE"
+        Keep => "KEEP"
+
+## Sort key: lower is safer to delete.
+pub fn Rating.rank(self) int
+    match self
+        Safe => 0
+        Probably => 1
+        Keep => 2
+
+## One file or directory. `alloc`, `dev`, `ino` and `nlink` are 0 until `fs.scan`
+## lands in ail (docs/ail-requests.md); then hard links count once and sizes are
+## bytes on disk. Until then `size` is the logical size.
+pub struct Entry
+    pub path str
+    pub size int
+    pub alloc int
+    pub mtime_ms int
+    pub is_dir bool
+    pub dev int
+    pub ino int
+    pub nlink int
+    pub is_symlink bool
+
+pub fn Entry.bytes(self) int
+    if alloc > 0
+        alloc
+    else
+        size
+
+pub struct Verdict
+    pub rating Rating
+    pub confidence int
+    pub rule str
+    pub reason str
+    pub regrows bool
+    pub protected bool
+
+pub fn Verdict.keep(rule str, confidence int, reason str, protected bool) Verdict
+    Verdict(
+        rating: Keep,
+        confidence: confidence,
+        rule: rule,
+        reason: reason,
+        regrows: false,
+        protected: protected,
+    )
+
+## A planned deletion: one path, its size and why.
+pub struct Item
+    pub path str
+    pub bytes int
+    pub verdict Verdict
+
+SCHEMA := 1
+
+pub fn member(key str, value Json) JsonMember
+    JsonMember(key: key, value: value)
+
+pub fn obj(members List[JsonMember]) Json
+    Json.Obj(members)
+
+pub fn jint(n int) Json
+    Json.Num(n.to_float())
+
+pub fn verdict_json(v Verdict) Json
+    obj([
+        member("rating", Json.Str(v.rating.name())),
+        member("confidence", jint(v.confidence)),
+        member("rule", Json.Str(v.rule)),
+        member("reason", Json.Str(v.reason)),
+        member("regrows", Json.Bool(v.regrows)),
+        member("protected", Json.Bool(v.protected)),
+    ])
+
+pub fn item_json(it Item) Json
+    obj([
+        member("path", Json.Str(it.path)),
+        member("bytes", jint(it.bytes)),
+        member("verdict", verdict_json(it.verdict)),
+    ])
+
+## Every document starts with `schema` so agents can tell versions apart.
+pub fn document(kind str, members List[JsonMember]) Json
+    mut all := [member("schema", jint(SCHEMA)), member("kind", Json.Str(kind))]
+    all.extend(members)
+    obj(all)
+
+## Human sizes: 1.5 GB, 320 MB, 12 KB, 7 B.
+pub fn human(n int) str
+    f := n.to_float()
+    if n >= 1073741824
+        "{f / 1073741824.0:.1} GB"
+    else if n >= 1048576
+        "{f / 1048576.0:.1} MB"
+    else if n >= 1024
+        "{f / 1024.0:.0} KB"
+    else
+        "{n} B"
+
+@test fn human_sizes()
+    assert_eq(human(7), "7 B")
+    assert_eq(human(2048), "2 KB")
+    assert_eq(human(3145728), "3.0 MB")
+
+@test fn entry_bytes_prefers_alloc()
+    e := Entry(
+        path: "a",
+        size: 10,
+        alloc: 4096,
+        mtime_ms: 0,
+        is_dir: false,
+        dev: 0,
+        ino: 0,
+        nlink: 1,
+        is_symlink: false,
+    )
+    assert_eq(e.bytes(), 4096)
