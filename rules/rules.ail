@@ -149,11 +149,11 @@ pub fn relative(p str, home str) str
         p
 
 fn within(rel str, dir str) bool
-    rel == dir || rel.starts_with("{dir}/")
+    rel == dir or rel.starts_with("{dir}/")
 
 pub fn is_protected(p str, home str) bool
     rel := relative(p, home)
-    if p.contains(".photoslibrary") || p.contains(".musiclibrary")
+    if p.contains(".photoslibrary") or p.contains(".musiclibrary")
         return true
     if rel != p
         for d in protected_home()
@@ -171,23 +171,23 @@ fn depth(s str) int
 fn fits(r Rule, p str, rel str, is_dir bool, mtime_ms int, now_ms int, markers Set[str]) bool
     match r.kind
         "prefix" =>
-            if !is_dir
+            if not is_dir
                 return false
             if r.expand
-                depth(rel) == depth(r.pattern) + 1 && rel.starts_with("{r.pattern}/")
+                depth(rel) == depth(r.pattern) + 1 and rel.starts_with("{r.pattern}/")
             else
                 rel == r.pattern
         "name" =>
-            if !is_dir || path.base(p) != r.pattern
+            if not is_dir or path.base(p) != r.pattern
                 return false
-            r.needs == "" || markers.contains(path.dir(p) + "/" + r.needs)
+            r.needs == "" or markers.contains(path.dir(p) + "/" + r.needs)
         "ext" =>
             if is_dir
                 return false
-            if r.under != "" && !within(rel, r.under)
+            if r.under != "" and not within(rel, r.under)
                 return false
             age := (now_ms - mtime_ms) / DAY_MS
-            age >= r.min_age_days && r.pattern.split("|").contains(path.ext(p).to_lower())
+            age >= r.min_age_days and r.pattern.split("|").contains(path.ext(p).to_lower())
         _ => false
 
 fn specificity(r Rule) int
@@ -204,7 +204,7 @@ pub fn rate(
     rules List[Rule],
     allow_protected bool,
 ) model.Verdict
-    if !allow_protected && is_protected(p, home)
+    if not allow_protected and is_protected(p, home)
         return model.Verdict.keep(
             "protected",
             99,
@@ -215,7 +215,7 @@ pub fn rate(
     mut best := -1
     for i in 0..rules.len()
         if fits(rules[i], p, rel, is_dir, mtime_ms, now_ms, markers)
-            if best < 0 || specificity(rules[i]) > specificity(rules[best])
+            if best < 0 or specificity(rules[i]) > specificity(rules[best])
                 best = i
     if best < 0
         return model.Verdict.keep(
@@ -267,7 +267,7 @@ fn rated(p str, is_dir bool, age_days int, markers List[str]) model.Verdict
     assert(rules_protected_system())
 
 fn rules_protected_system() bool
-    is_protected("/System/Library/x", "/Users/u") && !is_protected("/Users/u/code", "/Users/u")
+    is_protected("/System/Library/x", "/Users/u") and not is_protected("/Users/u/code", "/Users/u")
 
 @test fn old_installers_in_downloads()
     assert_eq(rated("/Users/u/Downloads/x.dmg", false, 45, []).rule, "installer")

@@ -67,9 +67,9 @@ pub fn choose(items List[model.Item], max_bytes int, only_safe bool) List[model.
     mut out := List[model.Item]()
     mut used := 0
     for it in ranked
-        if only_safe && it.verdict.rating.rank() > 0
+        if only_safe and it.verdict.rating.rank() > 0
             continue
-        if max_bytes > 0 && used + it.bytes > max_bytes
+        if max_bytes > 0 and used + it.bytes > max_bytes
             continue
         used += it.bytes
         out.push(it)
@@ -98,7 +98,7 @@ pub struct Planned
 
 pub fn parse_plan(text str) List[Planned] ! JsonError
     doc := parse_json(text)?
-    if doc.int("schema") != 1 || doc.text("kind", "") != "plan"
+    if doc.int("schema") != 1 or doc.text("kind", "") != "plan"
         return JsonError(at: -1, message: "not a husk plan, schema 1")
     mut out := List[Planned]()
     for it in doc.arr("items") else []
@@ -145,8 +145,8 @@ pub fn duplicates(
 ) List[List[str]] ! fs.IoError
     mut by_size := {}
     for e in s.files
-        if e.size >= min_bytes && e.size <= cap && !e.is_symlink
-            if allow_protected || !rules.is_protected(e.path, home)
+        if e.size >= min_bytes and e.size <= cap and not e.is_symlink
+            if allow_protected or not rules.is_protected(e.path, home)
                 by_size.push(e.size, e.path)
     mut groups := List[List[str]]()
     for size, paths in by_size
@@ -200,8 +200,8 @@ pub fn undo_json(applied List[Planned], created_ms int) Json
     mut accepted := Set[str]()
     accepted.add("/a/node_modules")
     assert(covered(accepted, "/a/node_modules/x/y"))
-    assert(!covered(accepted, "/a/node_modules-other/y"))
-    assert(!covered(accepted, "/a/src/y"))
+    assert(not covered(accepted, "/a/node_modules-other/y"))
+    assert(not covered(accepted, "/a/src/y"))
 
 @test fn choose_respects_budget_and_order()
     safe := model.Verdict(
