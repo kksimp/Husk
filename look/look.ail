@@ -1,0 +1,87 @@
+## look: Husk's colors and the few drawing helpers its canvas needs. Safari-style
+## dark like Garlic: neutral grays, one blue accent, and green / amber / red
+## only for the safety of deleting something.
+
+use std.app
+
+pub BG := 0x1e1e20
+pub SIDE := 0x2b2b2d
+pub PANEL := 0x252527
+pub LINE := 0x38383a
+pub TEXT := 0xf2f2f7
+pub DIM := 0x98989d
+pub ACCENT := 0x0a84ff
+pub SAFE := 0x30d158
+pub REVIEW := 0xff9f0a
+pub KEEP := 0xff453a
+
+## The color for a safety word.
+pub fn safety_color(s str) int
+    if s == "safe"
+        return SAFE
+    if s == "review"
+        return REVIEW
+    KEEP
+
+## The label for a safety word.
+pub fn safety_label(s str) str
+    if s == "safe"
+        return "Safe"
+    if s == "review"
+        return "Review"
+    "Keep"
+
+fn mix_ch(a int, b int, sh int, t float) int
+    ca := a.shr(sh).bit_and(255).to_float()
+    cb := b.shr(sh).bit_and(255).to_float()
+    (ca + (cb - ca) * t).round().to_int()
+
+## The color `t` of the way from `a` to `b` (0 to 1).
+pub fn mix(a int, b int, t float) int
+    mix_ch(a, b, 16, t).shl(16).bit_or(mix_ch(a, b, 8, t).shl(8)).bit_or(mix_ch(a, b, 0, t))
+
+## Sans text with its top-left corner at (x, y).
+pub fn text(x float, y float, s str, fg int, size float, bold bool) app.Op
+    app.Op.Str(
+        x: x,
+        y: y,
+        text: s,
+        font: "sans",
+        size: size,
+        fg: fg,
+        bold: bold,
+        italic: false,
+        underline: false,
+    )
+
+## About how wide sans text is. A rough fit until the host measures it (std.app.13).
+pub fn width(s str, size float) float
+    s.len().to_float() * size * 0.56
+
+## `s` cut with an ellipsis to fit `w` points.
+pub fn fit(s str, w float, size float) str
+    room := (w / (size * 0.56)).floor().to_int()
+    if s.len() <= room
+        return s
+    if room <= 1
+        return ""
+    "{s.slice(0, room - 1)}…"
+
+## A rectangle with round corners of radius `r` over a flat background `bg`.
+pub fn round(mut ops List[app.Op], x float, y float, w float, h float, r float, c int, bg int)
+    rr := r.min(h / 2.0).min(w / 2.0)
+    n := rr.ceil().to_int()
+    ops.push(app.draw_rect(x, y + rr, w, h - 2.0 * rr, c))
+    for i in 0..n
+        d := rr - i.to_float() - 0.5
+        inset := rr - (rr * rr - d * d).max(0.0).sqrt()
+        left := x + inset
+        right := x + w - inset
+        first := left.ceil()
+        last := right.floor()
+        for yy in [y + i.to_float(), y + h - i.to_float() - 1.0]
+            ops.push(app.draw_rect(first, yy, (last - first).max(0.0), 1.0, c))
+            if first > left
+                ops.push(app.draw_rect(first - 1.0, yy, 1.0, 1.0, mix(bg, c, first - left)))
+            if right > last
+                ops.push(app.draw_rect(last, yy, 1.0, 1.0, mix(bg, c, right - last)))

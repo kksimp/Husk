@@ -1,0 +1,476 @@
+## mock: the scanned tree Husk shows. This is a MOCK with a fixed Mac-like tree
+## until the core lane's real model (scan + cleanup rules) lands; the shapes
+## here (flat `Entry` list, parent before children, `safety` + `reason`) are
+## what the GUI needs from it.
+
+## One file or folder. `safety` is `safe` (can be deleted, regenerates),
+## `review` (probably fine, look first) or `keep` (don't delete).
+pub struct Entry
+    pub name str
+    pub size int
+    pub is_dir bool
+    pub safety str
+    pub reason str
+    pub cat str
+    pub parent int
+    pub kids List[int]
+    pub age str
+    ## The real path; empty for the mock tree.
+    pub path str
+
+pub struct Model
+    pub entries List[Entry]
+    pub vol_total int
+    pub vol_used int
+
+## The category ids the sidebar lists, with their titles.
+pub CATS := [
+    ("caches", "Caches"),
+    ("logs", "Logs"),
+    ("dev", "Developer"),
+    ("downloads", "Downloads"),
+    ("apps", "Apps"),
+    ("media", "Media"),
+    ("docs", "Documents"),
+]
+
+GB := 1073741824
+MB := 1048576
+
+pub fn add(
+    mut m Model,
+    parent int,
+    name str,
+    size int,
+    is_dir bool,
+    safety str,
+    reason str,
+    cat str,
+    age str,
+) int
+    id := m.entries.len()
+    m.entries.push(Entry(
+        name: name,
+        size: size,
+        is_dir: is_dir,
+        safety: safety,
+        reason: reason,
+        cat: cat,
+        parent: parent,
+        kids: [],
+        age: age,
+        path: "",
+    ))
+    if parent >= 0
+        m.entries[parent].kids.push(id)
+    id
+
+## A fixed tree for layout work: a 512 GB Mac, 400 GB used.
+pub fn mock() Model
+    mut m := Model(entries: [], vol_total: 512 * GB, vol_used: 400 * GB)
+    root := add(mut m, -1, "Macintosh HD", 0, true, "keep", "Your startup disk", "", "")
+    lib := add(
+        mut m,
+        root,
+        "Library",
+        0,
+        true,
+        "review",
+        "Per-user app data; most of it is rebuilt on demand",
+        "",
+        "",
+    )
+    cac := add(
+        mut m,
+        lib,
+        "Caches",
+        0,
+        true,
+        "safe",
+        "Apps rebuild caches when they need them",
+        "caches",
+        "",
+    )
+    add(
+        mut m,
+        cac,
+        "com.apple.Safari",
+        3 * GB,
+        true,
+        "safe",
+        "Browser cache; Safari refetches pages",
+        "caches",
+        "2 days ago",
+    )
+    add(
+        mut m,
+        cac,
+        "Google/Chrome",
+        6 * GB + 200 * MB,
+        true,
+        "safe",
+        "Browser cache; Chrome refetches pages",
+        "caches",
+        "yesterday",
+    )
+    add(
+        mut m,
+        cac,
+        "com.spotify.client",
+        2 * GB + 400 * MB,
+        true,
+        "safe",
+        "Offline song cache; streams again when needed",
+        "caches",
+        "4 days ago",
+    )
+    add(
+        mut m,
+        cac,
+        "pip",
+        900 * MB,
+        true,
+        "safe",
+        "Downloaded wheels; pip downloads them again",
+        "caches",
+        "3 months ago",
+    )
+    logs := add(mut m, lib, "Logs", 0, true, "safe", "Old diagnostic logs nobody reads", "logs", "")
+    add(
+        mut m,
+        logs,
+        "DiagnosticReports",
+        1 * GB + 100 * MB,
+        true,
+        "safe",
+        "Crash reports older than 30 days",
+        "logs",
+        "5 months ago",
+    )
+    add(
+        mut m,
+        logs,
+        "system.log.archive",
+        700 * MB,
+        false,
+        "safe",
+        "Rotated system logs",
+        "logs",
+        "2 months ago",
+    )
+    app := add(
+        mut m,
+        lib,
+        "Application Support",
+        0,
+        true,
+        "keep",
+        "App settings and data; deleting loses state",
+        "",
+        "",
+    )
+    add(
+        mut m,
+        app,
+        "MobileSync/Backup",
+        38 * GB,
+        true,
+        "review",
+        "Old iPhone backup; keep it if you have no other copy",
+        "media",
+        "14 months ago",
+    )
+    add(mut m, app, "Slack", 2 * GB, true, "keep", "Your workspaces and sign-in", "apps", "today")
+    users := add(mut m, root, "Users", 0, true, "keep", "Your files", "", "")
+    me := add(mut m, users, "kaleb", 0, true, "keep", "Your home folder", "", "")
+    dev := add(
+        mut m,
+        me,
+        "Projects",
+        0,
+        true,
+        "review",
+        "Your code; the build output inside is disposable",
+        "dev",
+        "",
+    )
+    add(
+        mut m,
+        dev,
+        "ail/.build",
+        9 * GB + 500 * MB,
+        true,
+        "safe",
+        "Build output; `ail build` recreates it",
+        "dev",
+        "3 days ago",
+    )
+    add(
+        mut m,
+        dev,
+        "garlic/node_modules",
+        4 * GB,
+        true,
+        "safe",
+        "Dependencies; reinstall restores them",
+        "dev",
+        "1 month ago",
+    )
+    add(
+        mut m,
+        dev,
+        "clove/corpus",
+        12 * GB,
+        true,
+        "keep",
+        "Test data you made; no copy elsewhere",
+        "dev",
+        "last week",
+    )
+    xc := add(mut m, me, "Xcode", 0, true, "safe", "Xcode build data and old simulators", "dev", "")
+    add(
+        mut m,
+        xc,
+        "DerivedData",
+        14 * GB,
+        true,
+        "safe",
+        "Xcode rebuilds this on the next build",
+        "dev",
+        "1 week ago",
+    )
+    add(
+        mut m,
+        xc,
+        "iOS DeviceSupport",
+        8 * GB + 300 * MB,
+        true,
+        "safe",
+        "Symbols for old iOS versions; fetched when a device connects",
+        "dev",
+        "9 months ago",
+    )
+    dl := add(
+        mut m,
+        me,
+        "Downloads",
+        0,
+        true,
+        "review",
+        "Things you downloaded and may have forgotten",
+        "downloads",
+        "",
+    )
+    add(
+        mut m,
+        dl,
+        "Ubuntu-24.04.iso",
+        5 * GB + 800 * MB,
+        false,
+        "review",
+        "Installer image; re-downloadable",
+        "downloads",
+        "8 months ago",
+    )
+    add(
+        mut m,
+        dl,
+        "Xcode_16.xip",
+        3 * GB + 500 * MB,
+        false,
+        "safe",
+        "Installer for an app that is already installed",
+        "downloads",
+        "11 months ago",
+    )
+    add(
+        mut m,
+        dl,
+        "taxes-2025.pdf",
+        40 * MB,
+        false,
+        "keep",
+        "Looks like a personal document",
+        "docs",
+        "7 months ago",
+    )
+    mv := add(mut m, me, "Movies", 0, true, "keep", "Your videos", "media", "")
+    add(
+        mut m,
+        mv,
+        "Wedding.mov",
+        22 * GB,
+        false,
+        "keep",
+        "Personal video, not recreatable",
+        "media",
+        "2 years ago",
+    )
+    add(
+        mut m,
+        mv,
+        "Screen Recordings",
+        7 * GB,
+        true,
+        "review",
+        "Screen recordings; you may not need them",
+        "media",
+        "5 months ago",
+    )
+    ph := add(mut m, me, "Pictures", 0, true, "keep", "Your photos", "media", "")
+    add(
+        mut m,
+        ph,
+        "Photos Library.photoslibrary",
+        64 * GB,
+        true,
+        "keep",
+        "Your photo library",
+        "media",
+        "today",
+    )
+    add(
+        mut m,
+        me,
+        "Trash",
+        11 * GB,
+        true,
+        "safe",
+        "Already in the Trash; emptying frees the space",
+        "caches",
+        "various",
+    )
+    ap := add(mut m, root, "Applications", 0, true, "review", "Installed apps", "apps", "")
+    add(mut m, ap, "Xcode.app", 36 * GB, true, "keep", "Developer tools you use", "apps", "today")
+    add(
+        mut m,
+        ap,
+        "GarageBand.app",
+        2 * GB + 300 * MB,
+        true,
+        "review",
+        "Not opened in over a year",
+        "apps",
+        "14 months ago",
+    )
+    add(
+        mut m,
+        ap,
+        "Final Cut Pro.app",
+        5 * GB + 200 * MB,
+        true,
+        "review",
+        "Not opened in over a year",
+        "apps",
+        "18 months ago",
+    )
+    add(mut m, root, "System", 28 * GB, true, "keep", "macOS itself", "", "")
+    add(
+        mut m,
+        root,
+        "private/var/vm",
+        6 * GB,
+        true,
+        "keep",
+        "Swap and sleep image; macOS manages it",
+        "",
+        "",
+    )
+    finish(mut m)
+    m
+
+## Gives every folder with children the sum of its children's sizes.
+pub fn finish(mut m Model)
+    mut i := m.entries.len() - 1
+    while i >= 0
+        if not m.entries[i].kids.is_empty()
+            mut t := 0
+            for k in m.entries[i].kids
+                t += m.entries[k].size
+            m.entries[i].size = t
+        i -= 1
+
+## Each entry's size with trashed entries (`gone`) removed: a trashed entry
+## counts 0 and its size comes off every folder above it. A folder's size is
+## its scanned total, which may be more than its listed children.
+pub fn sizes(m Model, gone Set[int]) List[int]
+    mut out := [e.size for e in m.entries]
+    for g in 0..m.entries.len()
+        if not gone.contains(g)
+            continue
+        if g > 0 and covered(m, m.entries[g].parent, gone)
+            out[g] = 0
+            continue
+        amount := m.entries[g].size
+        mut cur := m.entries[g].parent
+        while cur >= 0
+            out[cur] -= amount
+            cur = m.entries[cur].parent
+        out[g] = 0
+    out
+
+## Is `id` under (or equal to) an entry in `marks`?
+pub fn covered(m Model, id int, marks Set[int]) bool
+    mut cur := id
+    while cur >= 0
+        if marks.contains(cur)
+            return true
+        cur = m.entries[cur].parent
+    false
+
+## The marked entries that count: those with no marked ancestor.
+pub fn top_marks(m Model, marks Set[int]) List[int]
+    mut out := List[int]()
+    for id in 0..m.entries.len()
+        if marks.contains(id) and not covered(m, m.entries[id].parent, marks)
+            out.push(id)
+    out
+
+## The entries a view shows. `filter` is empty (the children of `cur`),
+## `safe` (every safe entry whose parent is not safe) or a category id (the
+## top-most entries of that category).
+pub fn rows(m Model, cur int, filter str, eff List[int]) List[int]
+    mut out := List[int]()
+    if filter == ""
+        for k in m.entries[cur].kids
+            if eff[k] > 0
+                out.push(k)
+        return out
+    for id in 1..m.entries.len()
+        e := m.entries[id]
+        if eff[id] <= 0
+            continue
+        pe := m.entries[e.parent]
+        hit := if filter == "safe" then e.safety == "safe"
+            and pe.safety != "safe" else e.cat == filter
+            and pe.cat != filter
+        if hit
+            out.push(id)
+    out
+
+## The size of everything a filter finds, for the sidebar.
+pub fn filter_total(m Model, filter str, eff List[int]) int
+    mut s := 0
+    for id in rows(m, 0, filter, eff)
+        s += eff[id]
+    s
+
+## The path of `id`, root first.
+pub fn trail(m Model, id int) List[int]
+    mut out := List[int]()
+    mut cur := id
+    while cur >= 0
+        out.insert(0, cur)
+        cur = m.entries[cur].parent
+    out
+
+## `1.5 GB`, `320 MB`, `12 KB`.
+pub fn fmt_size(n int) str
+    x := n.to_float()
+    if n >= GB
+        return "{x / 1073741824.0:.1} GB"
+    if n >= MB
+        return "{(x / 1048576.0).round().to_int()} MB"
+    if n >= 1024
+        return "{(x / 1024.0).round().to_int()} KB"
+    "{n} B"

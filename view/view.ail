@@ -1,0 +1,749 @@
+## view: Husk's whole window as one canvas display list, plus the click regions
+## drawn with it. `draw` is pure; `Husk.update` looks a click up in the same
+## regions, so what is drawn and what is hit cannot drift apart.
+
+use std.app
+use mock
+use treemap
+use look
+
+## Everything the window needs to remember.
+pub struct State
+    pub m mock.Model
+    pub eff List[int]
+    pub gone Set[int]
+    pub marks Set[int]
+    pub cur int
+    pub filter str
+    pub sel int
+    pub sort_key str
+    pub desc bool
+    pub top float
+    pub sheet bool
+    pub undo List[int]
+    pub w float
+    pub h float
+    ## Scan progress 0 to 1; below 1 the toolbar shows a progress bar.
+    pub pct float
+    pub scan_note str
+    ## A line for the footer, such as why a move to the Trash failed.
+    pub notice str
+
+## A rectangle that reacts to a click. `kind` says what; `k` is an entry id or
+## index, `arg` a filter or sort key.
+pub struct Region
+    pub x float
+    pub y float
+    pub w float
+    pub h float
+    pub kind str
+    pub k int
+    pub arg str
+
+pub struct Frame
+    pub ops List[app.Op]
+    pub regs List[Region]
+
+pub SIDE_W := 220.0
+pub TOOL_H := 48.0
+pub ROW_H := 30.0
+HEAD_H := 26.0
+DETAIL_H := 68.0
+FOOT_H := 54.0
+
+pub fn State.new(m mock.Model) State
+    State(
+        m: m,
+        eff: mock.sizes(m, {}),
+        gone: {},
+        marks: {},
+        cur: 0,
+        filter: "",
+        sel: -1,
+        sort_key: "size",
+        desc: true,
+        top: 0.0,
+        sheet: false,
+        undo: [],
+        w: 1100.0,
+        h: 720.0,
+        pct: 1.0,
+        scan_note: "",
+        notice: "",
+    )
+
+## The ids the list and treemap show, in the order the user sorted them.
+pub fn State.shown(self) List[int]
+    ids := mock.rows(m, cur, filter, eff)
+    mut keys := List[int]()
+    if sort_key == "name"
+        mut names := List[str]()
+        for i in ids
+            names.push(m.entries[i].name.to_lower())
+        ranked := names.sorted()
+        for n in names
+            keys.push(ranked.index_of(n) else 0)
+    else
+        for i in ids
+            big := FAR - eff[i].min(FAR - 1)
+            keys.push(if sort_key == "safety" then rank(m.entries[i].safety) * FAR + big else big)
+    by := order(keys, ids)
+    if (sort_key == "size" and not desc)
+        or (sort_key == "safety" and desc)
+        or (sort_key == "name" and desc)
+        return flip(by)
+    by
+
+## Bytes (and ranks) are packed below this so `order` can sort plain ints.
+FAR := 1099511627776
+SLOT := 1048576
+
+## `ids` sorted by `keys` (each below 2^42), ties by id; both lists line up.
+fn order(keys List[int], ids List[int]) List[int]
+    mut packed := List[int]()
+    for n in 0..ids.len()
+        packed.push(keys[n] * SLOT + ids[n])
+    mut out := List[int]()
+    for c in packed.sorted()
+        out.push(c % SLOT)
+    out
+
+fn flip(xs List[int]) List[int]
+    mut out := List[int]()
+    mut i := xs.len() - 1
+    while i >= 0
+        out.push(xs[i])
+        i -= 1
+    out
+
+fn rank(s str) int
+    if s == "safe"
+        return 0
+    if s == "review"
+        return 1
+    2
+
+## Total bytes the marks would free.
+pub fn State.reclaim(self) int
+    mut t := 0
+    for id in mock.top_marks(m, marks)
+        t += eff[id]
+    t
+
+fn State.title(self) str
+    if filter == ""
+        return m.entries[cur].name
+    if filter == "safe"
+        return "Safe to delete"
+    for c in mock.CATS
+        if c.0 == filter
+            return c.1
+    filter
+
+fn rect(mut ops List[app.Op], x float, y float, w float, h float, c int)
+    ops.push(app.draw_rect(x, y, w, h, c))
+
+fn reg(mut regs List[Region], x float, y float, w float, h float, kind str, k int, arg str)
+    regs.push(Region(x: x, y: y, w: w, h: h, kind: kind, k: k, arg: arg))
+
+fn badge(mut ops List[app.Op], x float, y float, safety str, bg int)
+    c := look.safety_color(safety)
+    look.round(mut ops, x, y, 56.0, 20.0, 10.0, look.mix(bg, c, 0.22), bg)
+    ops.push(look.text(
+        x + 28.0 - look.width(look.safety_label(safety), 11.0) / 2.0,
+        y + 4.0,
+        look.safety_label(safety),
+        c,
+        11.0,
+        true,
+    ))
+
+fn button(
+    mut ops List[app.Op],
+    mut regs List[Region],
+    x float,
+    y float,
+    w float,
+    label str,
+    primary bool,
+    bg int,
+    kind str,
+)
+    face := if primary then look.ACCENT else look.mix(bg, 0xffffff, 0.1)
+    look.round(mut ops, x, y, w, 28.0, 7.0, face, bg)
+    ops.push(look.text(
+        x + w / 2.0 - look.width(label, 12.0) / 2.0,
+        y + 7.0,
+        label,
+        0xffffff,
+        12.0,
+        primary,
+    ))
+    reg(mut regs, x, y, w, 28.0, kind, 0, "")
+
+fn check(mut ops List[app.Op], x float, y float, on bool, bg int)
+    if on
+        look.round(mut ops, x, y, 15.0, 15.0, 4.0, look.ACCENT, bg)
+        ops.push(look.text(x + 3.0, y + 1.0, "✓", 0xffffff, 11.0, true))
+    else
+        look.round(mut ops, x, y, 15.0, 15.0, 4.0, look.DIM, bg)
+        look.round(mut ops, x + 1.0, y + 1.0, 13.0, 13.0, 3.0, bg, look.DIM)
+
+## The sidebar: title, the volume bar, and what to look at.
+fn sidebar(s State, mut ops List[app.Op], mut regs List[Region])
+    rect(mut ops, 0.0, 0.0, SIDE_W, s.h, look.SIDE)
+    rect(mut ops, SIDE_W - 1.0, 0.0, 1.0, s.h, look.LINE)
+    ops.push(look.text(20.0, 18.0, "Husk", look.TEXT, 20.0, true))
+    ops.push(look.text(20.0, 44.0, "What is using your disk", look.DIM, 11.0, false))
+    # The volume card.
+    ops.push(look.text(20.0, 82.0, "Macintosh HD", look.TEXT, 12.0, true))
+    bw := SIDE_W - 40.0
+    if s.m.vol_total <= 0
+        # No volume numbers (fs.volume, ADR 0928): show what the scan found.
+        ops.push(look.text(
+            20.0,
+            104.0,
+            "{mock.fmt_size(s.eff[0])} scanned",
+            look.TEXT,
+            12.0,
+            false,
+        ))
+        if s.reclaim() > 0
+            ops.push(look.text(
+                20.0,
+                124.0,
+                "{mock.fmt_size(s.reclaim())} can be freed",
+                look.SAFE,
+                11.0,
+                false,
+            ))
+        sidebar_nav(s, mut ops, mut regs)
+        return
+    look.round(mut ops, 20.0, 104.0, bw, 8.0, 4.0, look.mix(look.SIDE, 0xffffff, 0.12), look.SIDE)
+    used := s.m.vol_used.to_float() / s.m.vol_total.to_float()
+    uw := bw * used
+    look.round(mut ops, 20.0, 104.0, uw, 8.0, 4.0, look.ACCENT, look.SIDE)
+    rec := (s.reclaim().to_float() / s.m.vol_total.to_float() * bw).min(uw)
+    if rec > 2.0
+        look.round(mut ops, 20.0 + uw - rec, 104.0, rec, 8.0, 4.0, look.SAFE, look.SIDE)
+    free := s.m.vol_total - s.m.vol_used
+    ops.push(look.text(
+        20.0,
+        120.0,
+        "{mock.fmt_size(s.m.vol_used)} of {mock.fmt_size(s.m.vol_total)} used",
+        look.DIM,
+        11.0,
+        false,
+    ))
+    ops.push(look.text(20.0, 136.0, "{mock.fmt_size(free)} free", look.TEXT, 11.0, false))
+    if s.reclaim() > 0
+        ops.push(look.text(
+            20.0,
+            152.0,
+            "{mock.fmt_size(free + s.reclaim())} free after cleanup",
+            look.SAFE,
+            11.0,
+            false,
+        ))
+    sidebar_nav(s, mut ops, mut regs)
+
+fn sidebar_nav(s State, mut ops List[app.Op], mut regs List[Region])
+    mut y := 184.0
+    items := [
+        ("", "Overview", "{mock.fmt_size(s.eff[0])}"),
+        ("safe", "Safe to delete", "{mock.fmt_size(mock.filter_total(s.m, "safe", s.eff))}"),
+    ]
+    y = nav_row(s, mut ops, mut regs, y, items[0].0, items[0].1, items[0].2)
+    y = nav_row(s, mut ops, mut regs, y, items[1].0, items[1].1, items[1].2)
+    ops.push(look.text(20.0, y + 14.0, "CATEGORIES", look.DIM, 10.0, true))
+    y += 34.0
+    for c in mock.CATS
+        total := mock.filter_total(s.m, c.0, s.eff)
+        if total > 0
+            y = nav_row(s, mut ops, mut regs, y, c.0, c.1, mock.fmt_size(total))
+
+fn nav_row(
+    s State,
+    mut ops List[app.Op],
+    mut regs List[Region],
+    y float,
+    id str,
+    name str,
+    size str,
+) float
+    on := s.filter == id
+    if on
+        look.round(
+            mut ops,
+            10.0,
+            y,
+            SIDE_W - 20.0,
+            28.0,
+            7.0,
+            look.mix(look.SIDE, look.ACCENT, 0.4),
+            look.SIDE,
+        )
+    ops.push(look.text(22.0, y + 7.0, name, if on then look.TEXT else 0xd1d1d6, 12.0, on))
+    ops.push(look.text(
+        SIDE_W - 20.0 - look.width(size, 11.0),
+        y + 8.0,
+        size,
+        look.DIM,
+        11.0,
+        false,
+    ))
+    reg(mut regs, 10.0, y, SIDE_W - 20.0, 28.0, "nav", 0, id)
+    y + 30.0
+
+## The toolbar: breadcrumb (or the view's name) on the left, scan state on the right.
+fn toolbar(s State, mut ops List[app.Op], mut regs List[Region])
+    x0 := SIDE_W
+    rect(mut ops, x0, 0.0, s.w - x0, TOOL_H, look.PANEL)
+    rect(mut ops, x0, TOOL_H - 1.0, s.w - x0, 1.0, look.LINE)
+    mut x := x0 + 16.0
+    if s.filter == ""
+        trail := mock.trail(s.m, s.cur)
+        for i, id in trail.enumerate()
+            last := i == trail.len() - 1
+            name := s.m.entries[id].name
+            ops.push(look.text(x, 16.0, name, if last then look.TEXT else look.DIM, 13.0, last))
+            w := look.width(name, 13.0)
+            if not last
+                reg(mut regs, x - 4.0, 8.0, w + 8.0, 32.0, "crumb", id, "")
+                ops.push(look.text(x + w + 6.0, 16.0, "›", look.DIM, 13.0, false))
+            x += w + 24.0
+    else
+        ops.push(look.text(x, 16.0, s.title(), look.TEXT, 13.0, true))
+    if s.pct < 1.0
+        pw := 160.0
+        px := s.w - pw - 20.0
+        look.round(
+            mut ops,
+            px,
+            21.0,
+            pw,
+            6.0,
+            3.0,
+            look.mix(look.PANEL, 0xffffff, 0.14),
+            look.PANEL,
+        )
+        look.round(mut ops, px, 21.0, (pw * s.pct).max(6.0), 6.0, 3.0, look.ACCENT, look.PANEL)
+        ops.push(look.text(
+            px - 12.0 - look.width(look.fit(s.scan_note, 260.0, 11.0), 11.0),
+            17.0,
+            look.fit(s.scan_note, 260.0, 11.0),
+            look.DIM,
+            11.0,
+            false,
+        ))
+    else
+        button(mut ops, mut regs, s.w - 96.0, 10.0, 80.0, "Rescan", false, look.PANEL, "rescan")
+
+## The treemap: one tile per shown entry, colored by how safe it is to delete.
+fn treemap_view(
+    s State,
+    ids List[int],
+    mut ops List[app.Op],
+    mut regs List[Region],
+    x float,
+    y float,
+    w float,
+    h float,
+)
+    rect(mut ops, x, y, w, h, look.BG)
+    if ids.is_empty()
+        ops.push(look.text(
+            x + w / 2.0 - 60.0,
+            y + h / 2.0 - 8.0,
+            "Nothing here",
+            look.DIM,
+            13.0,
+            false,
+        ))
+        return
+    ranked := s.sorted_by_size(ids)
+    boxes := treemap.layout([s.eff[i] for i in ranked], x, y, w, h)
+    for n, b in boxes.enumerate()
+        id := ranked[n]
+        e := s.m.entries[id]
+        c := look.safety_color(e.safety)
+        shade := 0.34 + 0.05 * (n % 3).to_float()
+        rect(
+            mut ops,
+            b.x + 1.0,
+            b.y + 1.0,
+            (b.w - 2.0).max(1.0),
+            (b.h - 2.0).max(1.0),
+            look.mix(look.BG, c, shade),
+        )
+        if id == s.sel
+            for edge in [
+                (0.0, 0.0, b.w, 2.0),
+                (0.0, b.h - 2.0, b.w, 2.0),
+                (0.0, 0.0, 2.0, b.h),
+                (b.w - 2.0, 0.0, 2.0, b.h),
+            ]
+                rect(mut ops, b.x + edge.0, b.y + edge.1, edge.2, edge.3, 0xffffff)
+        if s.marks.contains(id)
+            ops.push(look.text(b.x + b.w - 20.0, b.y + 6.0, "✓", 0xffffff, 13.0, true))
+        if b.w > 76.0 and b.h > 38.0
+            ops.push(look.text(
+                b.x + 10.0,
+                b.y + 8.0,
+                look.fit(e.name, b.w - 36.0, 12.0),
+                0xffffff,
+                12.0,
+                true,
+            ))
+            ops.push(look.text(
+                b.x + 10.0,
+                b.y + 25.0,
+                mock.fmt_size(s.eff[id]),
+                look.mix(0xffffff, c, 0.2),
+                11.0,
+                false,
+            ))
+        reg(mut regs, b.x, b.y, b.w, b.h, "tile", id, "")
+
+## Ids by size, largest first, for the treemap.
+fn State.sorted_by_size(self, ids List[int]) List[int]
+    mut keys := List[int]()
+    for i in ids
+        keys.push(FAR - eff[i].min(FAR - 1))
+    order(keys, ids)
+
+## The sortable list under the treemap.
+fn list_view(
+    s State,
+    ids List[int],
+    mut ops List[app.Op],
+    mut regs List[Region],
+    y float,
+    bottom float,
+)
+    x0 := SIDE_W
+    avail := s.w - x0
+    cx := x0 + 16.0
+    nx := x0 + 44.0
+    nw := (avail * 0.26).max(150.0)
+    sx := nx + nw
+    bx := sx + 82.0
+    gx := bx + 120.0
+    rx := gx + 72.0
+    rect(mut ops, x0, y, avail, HEAD_H, look.PANEL)
+    for h in [("name", "Name", nx), ("size", "Size", sx), ("safety", "Safety", gx)]
+        arrow := sort_arrow(s, h.0)
+        ops.push(look.text(
+            h.2,
+            y + 7.0,
+            "{h.1}{arrow}",
+            if s.sort_key == h.0 then look.TEXT else look.DIM,
+            11.0,
+            true,
+        ))
+        reg(mut regs, h.2 - 6.0, y, 90.0, HEAD_H, "sort", 0, h.0)
+    ops.push(look.text(rx, y + 7.0, "Why", look.DIM, 11.0, true))
+    top := y + HEAD_H
+    rect(mut ops, x0, top, avail, bottom - top, look.BG)
+    ops.push(app.Op.Clip(x: x0, y: top, w: avail, h: bottom - top))
+    mut big := 1
+    for i in ids
+        big = big.max(s.eff[i])
+    biggest := big.to_float()
+    for n, id in ids.enumerate()
+        ry := top + n.to_float() * ROW_H - s.top
+        if ry + ROW_H < top or ry > bottom
+            continue
+        e := s.m.entries[id]
+        mut bg := look.BG
+        if n % 2 == 1
+            bg = look.mix(look.BG, 0xffffff, 0.03)
+        if id == s.sel
+            bg = look.mix(look.BG, look.ACCENT, 0.35)
+        rect(mut ops, x0, ry, avail, ROW_H, bg)
+        check(mut ops, cx, ry + 7.0, s.marks.contains(id), bg)
+        vis := (bottom - ry).min(ROW_H)
+        reg(mut regs, cx - 6.0, ry.max(top), 30.0, vis, "check", id, "")
+        mark := if e.is_dir then "▸ " else ""
+        ops.push(look.text(
+            nx,
+            ry + 8.0,
+            look.fit("{mark}{e.name}", nw - 8.0, 12.0),
+            look.TEXT,
+            12.0,
+            false,
+        ))
+        ops.push(look.text(sx, ry + 8.0, mock.fmt_size(s.eff[id]), look.DIM, 12.0, false))
+        c := look.safety_color(e.safety)
+        look.round(
+            mut ops,
+            bx,
+            ry + 11.0,
+            (104.0 * s.eff[id].to_float() / biggest).max(3.0),
+            8.0,
+            3.0,
+            look.mix(bg, c, 0.7),
+            bg,
+        )
+        badge(mut ops, gx, ry + 5.0, e.safety, bg)
+        ops.push(look.text(
+            rx,
+            ry + 8.0,
+            look.fit(e.reason, s.w - rx - 16.0, 12.0),
+            look.DIM,
+            12.0,
+            false,
+        ))
+        reg(mut regs, nx - 4.0, ry.max(top), s.w - nx, vis, "row", id, "")
+    ops.push(app.Op.Unclip)
+
+fn sort_arrow(s State, key str) str
+    if s.sort_key != key
+        return ""
+    if s.desc
+        return " ▾"
+    " ▴"
+
+## What Husk knows about the selected entry.
+fn detail(s State, mut ops List[app.Op], y float)
+    x0 := SIDE_W
+    rect(mut ops, x0, y, s.w - x0, DETAIL_H, look.PANEL)
+    rect(mut ops, x0, y, s.w - x0, 1.0, look.LINE)
+    if s.sel < 0
+        ops.push(look.text(
+            x0 + 16.0,
+            y + 24.0,
+            "Select an item to see why Husk suggests keeping or deleting it.",
+            look.DIM,
+            12.0,
+            false,
+        ))
+        return
+    e := s.m.entries[s.sel]
+    mut names := List[str]()
+    for i in mock.trail(s.m, s.sel)
+        names.push(s.m.entries[i].name)
+    path := names.join(" / ")
+    ops.push(look.text(x0 + 16.0, y + 10.0, e.name, look.TEXT, 13.0, true))
+    badge(mut ops, x0 + 24.0 + look.width(e.name, 13.0), y + 8.0, e.safety, look.PANEL)
+    ops.push(look.text(
+        x0 + 16.0,
+        y + 30.0,
+        look.fit(e.reason, s.w - x0 - 32.0, 12.0),
+        look.TEXT,
+        12.0,
+        false,
+    ))
+    age := if e.age == "" then "" else " · last used {e.age}"
+    ops.push(look.text(
+        x0 + 16.0,
+        y + 48.0,
+        look.fit("{mock.fmt_size(s.eff[s.sel])}{age} · {path}", s.w - x0 - 32.0, 11.0),
+        look.DIM,
+        11.0,
+        false,
+    ))
+
+## The bottom bar: what is selected, or the undo for the last trash.
+fn footer(s State, mut ops List[app.Op], mut regs List[Region], y float)
+    x0 := SIDE_W
+    rect(mut ops, x0, y, s.w - x0, FOOT_H, look.SIDE)
+    rect(mut ops, x0, y, s.w - x0, 1.0, look.LINE)
+    n := mock.top_marks(s.m, s.marks).len()
+    if not s.undo.is_empty()
+        ops.push(look.text(
+            x0 + 16.0,
+            y + 19.0,
+            "Moved {s.undo.len()} items to the Trash",
+            look.SAFE,
+            12.0,
+            true,
+        ))
+        button(mut ops, mut regs, x0 + 220.0, y + 13.0, 70.0, "Undo", false, look.SIDE, "undo")
+    elif s.notice != ""
+        ops.push(look.text(
+            x0 + 16.0,
+            y + 19.0,
+            look.fit(s.notice, s.w - x0 - 380.0, 12.0),
+            look.REVIEW,
+            12.0,
+            true,
+        ))
+    elif n > 0
+        ops.push(look.text(
+            x0 + 16.0,
+            y + 19.0,
+            "{n} selected · {mock.fmt_size(s.reclaim())} can be freed",
+            look.TEXT,
+            12.0,
+            true,
+        ))
+    else
+        ops.push(look.text(
+            x0 + 16.0,
+            y + 19.0,
+            "Tick items to clear them out. Nothing is deleted until you confirm.",
+            look.DIM,
+            12.0,
+            false,
+        ))
+    button(
+        mut ops,
+        mut regs,
+        s.w - 332.0,
+        y + 13.0,
+        120.0,
+        "Select all safe",
+        false,
+        look.SIDE,
+        "all_safe",
+    )
+    button(
+        mut ops,
+        mut regs,
+        s.w - 202.0,
+        y + 13.0,
+        186.0,
+        "Review & Move to Trash…",
+        n > 0,
+        look.SIDE,
+        "review",
+    )
+
+## The confirmation sheet: exactly what goes to the Trash.
+fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
+    reg(mut regs, 0.0, 0.0, s.w, s.h, "scrim", 0, "")
+    top := mock.top_marks(s.m, s.marks)
+    shown := top.take(8)
+    pw := (s.w - 60.0).min(560.0)
+    ph := 190.0 + shown.len().to_float() * 30.0
+    px := (s.w - pw) / 2.0
+    py := ((s.h - ph) / 2.0).max(20.0)
+    # No alpha in the display list, so the sheet is a bordered panel over the window.
+    look.round(mut ops, px - 1.0, py - 1.0, pw + 2.0, ph + 2.0, 13.0, look.LINE, look.BG)
+    look.round(mut ops, px, py, pw, ph, 12.0, look.PANEL, look.LINE)
+    ops.push(look.text(
+        px + 24.0,
+        py + 20.0,
+        "Move {top.len()} items to the Trash?",
+        look.TEXT,
+        16.0,
+        true,
+    ))
+    ops.push(look.text(
+        px + 24.0,
+        py + 46.0,
+        "Frees {mock.fmt_size(s.reclaim())}. They stay in the Trash until you empty it, and Undo puts them back.",
+        look.DIM,
+        11.0,
+        false,
+    ))
+    mut risky := 0
+    for n, id in shown.enumerate()
+        ry := py + 74.0 + n.to_float() * 30.0
+        e := s.m.entries[id]
+        if e.safety != "safe"
+            risky += 1
+        ops.push(look.text(
+            px + 24.0,
+            ry + 7.0,
+            look.fit(e.name, pw - 220.0, 12.0),
+            look.TEXT,
+            12.0,
+            false,
+        ))
+        badge(mut ops, px + pw - 170.0, ry + 4.0, e.safety, look.PANEL)
+        sz := mock.fmt_size(s.eff[id])
+        ops.push(look.text(
+            px + pw - 24.0 - look.width(sz, 12.0),
+            ry + 7.0,
+            sz,
+            look.DIM,
+            12.0,
+            false,
+        ))
+    if top.len() > shown.len()
+        ops.push(look.text(
+            px + 24.0,
+            py + 74.0 + shown.len().to_float() * 30.0 + 6.0,
+            "and {top.len() - shown.len()} more",
+            look.DIM,
+            11.0,
+            false,
+        ))
+    for id in top
+        if s.m.entries[id].safety != "safe" and not shown.contains(id)
+            risky += 1
+    by := py + ph - 52.0
+    if risky > 0
+        ops.push(look.text(
+            px + 24.0,
+            by - 4.0,
+            "{risky} of these are not marked Safe. Check them before you go on.",
+            look.REVIEW,
+            11.0,
+            false,
+        ))
+    button(
+        mut ops,
+        mut regs,
+        px + pw - 24.0 - 170.0 - 10.0 - 80.0,
+        by + 8.0,
+        80.0,
+        "Cancel",
+        false,
+        look.PANEL,
+        "cancel",
+    )
+    button(
+        mut ops,
+        mut regs,
+        px + pw - 24.0 - 170.0,
+        by + 8.0,
+        170.0,
+        "Move to Trash",
+        true,
+        look.PANEL,
+        "trash",
+    )
+
+## The whole frame for a window of `s.w` by `s.h`.
+pub fn draw(s State) Frame
+    mut ops := [app.draw_rect(0.0, 0.0, s.w, s.h, look.BG)]
+    mut regs := List[Region]()
+    ids := s.shown()
+    x0 := SIDE_W
+    foot_y := s.h - FOOT_H
+    det_y := foot_y - DETAIL_H
+    tm_y := TOOL_H + 12.0
+    tm_h := ((det_y - tm_y) * 0.46).max(120.0)
+    list_y := tm_y + tm_h + 12.0
+    treemap_view(s, ids, mut ops, mut regs, x0 + 12.0, tm_y, s.w - x0 - 24.0, tm_h)
+    list_view(s, ids, mut ops, mut regs, list_y, det_y)
+    toolbar(s, mut ops, mut regs)
+    sidebar(s, mut ops, mut regs)
+    detail(s, mut ops, det_y)
+    footer(s, mut ops, mut regs, foot_y)
+    if s.sheet
+        sheet(s, mut ops, mut regs)
+    Frame(ops: ops, regs: regs)
+
+## The region a click at (x, y) landed on; later regions are on top.
+pub fn hit(f Frame, x float, y float) Region?
+    mut i := f.regs.len() - 1
+    while i >= 0
+        r := f.regs[i]
+        if x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h
+            return r
+        i -= 1
+    none
+
+## How far the list can scroll.
+pub fn max_scroll(s State) float
+    n := s.shown().len().to_float()
+    foot_y := s.h - FOOT_H
+    det_y := foot_y - DETAIL_H
+    tm_y := TOOL_H + 12.0
+    tm_h := ((det_y - tm_y) * 0.46).max(120.0)
+    top := tm_y + tm_h + 12.0 + HEAD_H
+    (n * ROW_H - (det_y - top)).max(0.0)

@@ -1,0 +1,127 @@
+## bridge: turns a scan (scan/, rules/) into the tree the GUI draws (mock.Model).
+## Only directories and files at least `min_bytes` big become entries, so a
+## home folder with a million files stays a few thousand tiles; a folder's size
+## is still its full scanned total.
+
+use mock
+use model
+use rules
+use scan
+
+fn base(p str) str
+    path.base(p)
+
+fn cat_of(rule str) str
+    if rule.starts_with("xcode")
+        or rule.starts_with("sim.")
+        or rule.starts_with("cargo")
+        or rule.starts_with("gradle")
+        or rule.starts_with("maven")
+        return "dev"
+    if [
+        "node_modules",
+        "next",
+        "swiftpm",
+        "pods",
+        "venv",
+        "tox",
+        "zigcache",
+        "js.build",
+        "pycache",
+        "pytest",
+        "mypy",
+    ].contains(rule)
+        return "dev"
+    if rule == "lib.logs"
+        return "logs"
+    if rule == "installer" or rule == "old.archive"
+        return "downloads"
+    if rule == "ios.backup"
+        return "media"
+    if rule == "none" or rule == "protected"
+        return ""
+    "caches"
+
+fn safety_of(r model.Rating) str
+    match r
+        Safe => "safe"
+        Probably => "review"
+        Keep => "keep"
+
+fn age_of(mtime_ms int, now_ms int) str
+    if mtime_ms <= 0
+        return ""
+    days := (now_ms - mtime_ms) / 86400000
+    if days < 1
+        return "today"
+    if days < 60
+        return "{days} days ago"
+    if days < 700
+        return "{days / 30} months ago"
+    "{days / 365} years ago"
+
+## The entry list for `s`: parents come before children.
+pub fn tree(s scan.Scan, home str, now_ms int, min_bytes int) mock.Model
+    rs := rules.builtin()
+    known := plan_markers(s)
+    mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0)
+    mut at := Map[str, int]()
+    mut order := List[str]()
+    for d, b in s.dirs
+        if b >= min_bytes or d == s.root
+            order.push(d)
+    mut files := Map[str, model.Entry]()
+    for e in s.files
+        if e.bytes() >= min_bytes
+            files[e.path] = e
+            order.push(e.path)
+    # A parent path is a prefix of its children's, so it sorts first.
+    for p in order.sorted()
+        is_file := files.contains(p)
+        size := if is_file then (files.get(p) else files_zero()).bytes() else (s.dirs.get(p) else 0)
+        mtime := if is_file then (files.get(p) else files_zero()).mtime_ms else 0
+        v := rules.rate(p, not is_file, mtime, home, now_ms, known, rs, false)
+        parent := at.get(path.dir(p)) else -1
+        mut safety := safety_of(v.rating)
+        mut why := v.reason
+        mut cat := cat_of(v.rule)
+        if v.rule == "none" and parent >= 0
+            pe := m.entries[parent]
+            if pe.safety != "keep"
+                safety = pe.safety
+                why = "inside {pe.name}: {pe.reason}"
+                cat = pe.cat
+        name := if parent < 0 then p else base(p)
+        id := mock.add(
+            mut m,
+            parent,
+            name,
+            size,
+            not is_file,
+            safety,
+            why,
+            cat,
+            age_of(mtime, now_ms),
+        )
+        m.entries[id].path = p
+        at[p] = id
+    m
+
+fn files_zero() model.Entry
+    model.Entry(
+        path: "",
+        size: 0,
+        alloc: 0,
+        mtime_ms: 0,
+        is_dir: false,
+        dev: 0,
+        ino: 0,
+        nlink: 1,
+        is_symlink: false,
+    )
+
+fn plan_markers(s scan.Scan) Set[str]
+    mut known := Set[str]()
+    for e in s.files
+        known.add(e.path)
+    known
