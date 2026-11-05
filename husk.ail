@@ -63,7 +63,9 @@ fn parse(args List[str]) Opts ! UsageError
             "--allow-protected" => o.allow_protected = true
             "--yes" => o.yes = true
             "--top" | "--max-bytes" | "--min-bytes" | "--out" =>
-                v := args.get(i) else return Bad(text: "{a} needs a value")
+                if i >= args.len()
+                    return Bad(text: "{a} needs a value")
+                v := args[i]
                 i += 1
                 match a
                     "--top" => o.top = v.to_int() else return Bad(text: "--top needs a number")
@@ -105,13 +107,13 @@ fn explain_doc(p str, allow_protected bool) Json ! fs.IoError
     parent := path.dir(p)
     for name in fs.list_dir(parent) else []
         known.add(path.join(parent, name))
-    mut bytes := m.size
+    mut nbytes := m.size
     if m.is_dir
-        bytes = scan.scan(p)?.total
+        nbytes = scan.scan(p)?.total
     v := rules.rate(p, m.is_dir, m.modified_ms, home(), time.now_ms(), known, rules.builtin(), allow_protected)
     model.document("explain", [
         model.member("path", Json.Str(p)),
-        model.member("bytes", model.jint(bytes)),
+        model.member("bytes", model.jint(nbytes)),
         model.member("is_dir", Json.Bool(m.is_dir)),
         model.member("verdict", model.verdict_json(v)),
     ])
@@ -195,10 +197,11 @@ fn cmd_apply(o Opts) ! fs.IoError | JsonError
         if not o.yes
             print("would trash {model.human(pl.bytes):>10}  {pl.path}")
             continue
-        plan.trash_item(pl.path) else err
+        loc := plan.trash_item(pl.path) else err
             print("FAILED {pl.path}: {err.text}")
             refused += 1
             break
+        print("trashed {pl.path} -> {loc}")
         done.push(pl)
     if o.yes and done.len() > 0
         dir := path.join(home(), ".husk/undo")

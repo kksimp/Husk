@@ -103,8 +103,8 @@ pub fn parse_plan(text str) List[Planned] ! JsonError
     mut out := List[Planned]()
     for it in doc.arr("items") else []
         out.push(Planned(
-            path: it.need_str("path")?,
-            rule: it.get("verdict")?.text("rule", ""),
+            path: it.str("path") else "",
+            rule: (it.get("verdict") else Json.Null).text("rule", ""),
             bytes: it.int("bytes") else 0,
         ))
     out
@@ -168,7 +168,7 @@ pub fn duplicate_items(groups List[List[str]], sizes Map[str, int]) List[model.I
         for p in g[1..]
             out.push(model.Item(
                 path: p,
-                bytes: sizes[p] else 0,
+                bytes: sizes.get(p) else 0,
                 verdict: model.Verdict(
                     rating: model.Rating.Probably,
                     confidence: 70,

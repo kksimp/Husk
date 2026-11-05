@@ -180,7 +180,7 @@ fn fits(r Rule, p str, rel str, is_dir bool, mtime_ms int, now_ms int, markers S
         "name" =>
             if not is_dir or path.base(p) != r.pattern
                 return false
-            r.needs == "" or markers.contains(path.dir(p) + "/" + r.needs)
+            r.needs == "" or markers.contains("{path.dir(p)}/{r.needs}")
         "ext" =>
             if is_dir
                 return false
