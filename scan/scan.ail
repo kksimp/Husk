@@ -19,7 +19,7 @@ fn parent(p str) str
 ## Add `n` bytes to every directory from `p`'s parent up to `root`.
 fn credit(mut dirs Map[str, int], root str, p str, n int)
     mut d := parent(p)
-    while d.len() >= root.len() && d.starts_with(root)
+    while d.len() >= root.len() and d.starts_with(root)
         dirs[d] += n
         next := parent(d)
         if next == d
@@ -53,7 +53,7 @@ pub fn scan(root str) Scan ! fs.IoError
             is_symlink: false,
         )
         files.push(e)
-        if e.nlink > 1 && !seen.add(link_key(e))
+        if e.nlink > 1 and not seen.add(link_key(e))
             continue
         credit(mut dirs, root, p, e.bytes())
         total += e.bytes()
