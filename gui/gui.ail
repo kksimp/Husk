@@ -258,9 +258,12 @@ fn scanner(inbox app.Inbox, reqs Channel[Req], done Channel[mock.Model])
         merged := bridge.merge(parts)
         floor := (merged.total / 3000).max(1).min(67108864)
         mut tree := bridge.tree(merged, r.label, home(), time.now_ms(), floor)
-        if v := fs.volume(r.roots[0])
-            tree.vol_total = v.total
-            tree.vol_used = v.total - v.free
+        v := fs.volume(r.roots[0]) else err
+            done.send(tree)
+            inbox.post(app.external("scan_done", ""))
+            continue
+        tree.vol_total = v.total
+        tree.vol_used = v.total - v.free
         done.send(tree)
         inbox.post(app.external("scan_done", ""))
 
