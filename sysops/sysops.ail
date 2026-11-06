@@ -3,14 +3,33 @@
 ## Both return "" on success and the reason on failure. Nothing here chooses
 ## what to delete; callers pass paths the user confirmed.
 
-## Offloads `p`: removes the copy on this Mac and keeps the file in iCloud
-## (`brctl evict`). It downloads again when opened.
-pub fn evict(p str) str
+## One `brctl evict`: "" on success, else the tool's own words.
+fn evict_one(p str) str
     r := proc.run("/usr/bin/brctl", ["evict", p], "", 120000) else err
-        return "could not offload {path.base(p)}: {err}"
+        return "{err}"
     if r.ok()
         return ""
-    "could not offload {path.base(p)}: {r.text().trim()}"
+    r.text().trim()
+
+## Offloads `p`: removes the copy on this Mac and keeps the file in iCloud
+## (`brctl evict`). It downloads again when opened. A folder that brctl refuses
+## is offloaded file by file; the reason names the first file that failed.
+pub fn evict(p str) str
+    first := evict_one(p)
+    if first == ""
+        return ""
+    names := fs.walk(p) else
+        return "could not offload {path.base(p)}: {first}"
+    mut failed := 0
+    mut why := first
+    for f in names
+        bad := evict_one(f)
+        if bad != ""
+            failed += 1
+            why = "{path.base(f)}: {bad}"
+    if failed == 0 and not names.is_empty()
+        return ""
+    "could not offload {failed} of {names.len()} files in {path.base(p)} ({why})"
 
 ## Is `p` a path Husk will remove with administrator rights? An absolute path
 ## at least three folders deep, without `..` or line breaks.
