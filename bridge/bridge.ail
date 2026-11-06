@@ -32,7 +32,11 @@ fn cat_of(rule str) str
         "mypy",
     ].contains(rule)
         return "dev"
-    if rule.starts_with("wallpaper") or rule.starts_with("macos.") or ["garageband", "logic", "loops"].contains(rule)
+    if rule.starts_with("wallpaper") or rule.starts_with("macos.") or [
+        "garageband",
+        "logic",
+        "loops",
+    ].contains(rule)
         return "system"
     if rule.starts_with("vscode") or rule.starts_with("xcpg")
         return "dev"

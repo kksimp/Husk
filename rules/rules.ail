@@ -81,31 +81,206 @@ fn macos_rules() List[Rule]
     safe := model.Rating.Safe
     prob := model.Rating.Probably
     [
-        dir_rule("sim.device", "Library/Developer/CoreSimulator/Devices", true, prob, 65, "one iOS simulator: its apps and test data; delete it with xcrun simctl delete if you no longer test on it"),
-        abs_rule("sim.runtime.vol", "/Library/Developer/CoreSimulator/Volumes", true, prob, 80, "an iOS, watchOS, tvOS or visionOS simulator runtime; Xcode > Settings > Platforms downloads it again"),
-        abs_rule("sim.runtime.img", "/Library/Developer/CoreSimulator/Images", true, prob, 80, "a simulator runtime disk image; Xcode downloads it again"),
-        abs_rule("sim.runtime.old", "/Library/Developer/CoreSimulator/Profiles/Runtimes", true, prob, 80, "an installed simulator runtime; Xcode downloads it again"),
-        abs_rule("sim.runtime.cryptex", "/Library/Developer/CoreSimulator/Cryptex", true, prob, 75, "simulator runtime support files"),
-        dir_rule("xcode.devsupport.each", "Library/Developer/Xcode/iOS DeviceSupport", true, prob, 85, "debug symbols for one iOS version; copied again when a device of that version connects"),
-        dir_rule("xcode.devsupport.watch", "Library/Developer/Xcode/watchOS DeviceSupport", false, prob, 85, "debug symbols for Apple Watch; copied again when a watch connects"),
-        dir_rule("xcode.devsupport.tv", "Library/Developer/Xcode/tvOS DeviceSupport", false, prob, 85, "debug symbols for Apple TV; copied again when one connects"),
-        dir_rule("xcode.devsupport.vision", "Library/Developer/Xcode/visionOS DeviceSupport", false, prob, 85, "debug symbols for Apple Vision Pro; copied again when one connects"),
-        dir_rule("xcode.products", "Library/Developer/Xcode/Products", false, prob, 70, "built products Xcode keeps for archives; rebuilt on the next archive"),
-        dir_rule("xcode.docs", "Library/Developer/Xcode/DocumentationCache", false, safe, 90, "Xcode's documentation cache; rebuilt when you open the docs"),
-        dir_rule("xcode.previews", "Library/Developer/Xcode/UserData/Previews", false, safe, 90, "SwiftUI preview data; rebuilt when a preview runs"),
-        dir_rule("xcode.cache", "Library/Caches/com.apple.dt.Xcode", false, safe, 90, "Xcode's cache; rebuilt on demand"),
-        dir_rule("xcpg", "Library/Developer/XCPGDevices", false, safe, 85, "Xcode Playground simulator devices; recreated when needed"),
-        abs_rule("wallpaper.idle", "/Library/Application Support/com.apple.idleassetsd", false, prob, 80, "downloaded Aerial screensaver and wallpaper videos; macOS downloads them again if you pick them"),
-        dir_rule("wallpaper.user", "Library/Application Support/com.apple.wallpaper/aerials", false, prob, 80, "downloaded Aerial wallpaper videos; macOS downloads them again if you pick them"),
-        abs_rule("wallpaper.desktop", "/Library/Desktop Pictures", false, prob, 60, "extra desktop pictures installed with macOS; the one you use is copied elsewhere"),
-        abs_rule("macos.updates", "/Library/Updates", false, prob, 85, "downloaded macOS updates; macOS fetches them again"),
-        abs_rule("macos.installdata", "/macOS Install Data", false, prob, 85, "left over from a macOS upgrade; safe once the upgrade finished"),
-        abs_rule("garageband", "/Library/Application Support/GarageBand", false, prob, 60, "GarageBand sound library; download it again from inside GarageBand"),
-        abs_rule("logic", "/Library/Application Support/Logic", false, prob, 60, "Logic Pro sound library; download it again from inside Logic"),
-        abs_rule("loops", "/Library/Audio/Apple Loops", false, prob, 60, "Apple Loops; GarageBand and Logic download them again"),
-        dir_rule("mail.downloads", "Library/Containers/com.apple.mail/Data/Library/Mail Downloads", false, prob, 70, "copies of mail attachments you opened; the originals stay in Mail"),
-        dir_rule("vscode.cache", "Library/Application Support/Code/CachedData", false, safe, 90, "VS Code's compiled-code cache; rebuilt on launch"),
-        dir_rule("vscode.vsix", "Library/Application Support/Code/CachedExtensionVSIXs", false, safe, 90, "downloaded extension packages; fetched again on update"),
+        dir_rule(
+            "sim.device",
+            "Library/Developer/CoreSimulator/Devices",
+            true,
+            prob,
+            65,
+            "one iOS simulator: its apps and test data; delete it with xcrun simctl delete if you no longer test on it",
+        ),
+        abs_rule(
+            "sim.runtime.vol",
+            "/Library/Developer/CoreSimulator/Volumes",
+            true,
+            prob,
+            80,
+            "an iOS, watchOS, tvOS or visionOS simulator runtime; Xcode > Settings > Platforms downloads it again",
+        ),
+        abs_rule(
+            "sim.runtime.img",
+            "/Library/Developer/CoreSimulator/Images",
+            true,
+            prob,
+            80,
+            "a simulator runtime disk image; Xcode downloads it again",
+        ),
+        abs_rule(
+            "sim.runtime.old",
+            "/Library/Developer/CoreSimulator/Profiles/Runtimes",
+            true,
+            prob,
+            80,
+            "an installed simulator runtime; Xcode downloads it again",
+        ),
+        abs_rule(
+            "sim.runtime.cryptex",
+            "/Library/Developer/CoreSimulator/Cryptex",
+            true,
+            prob,
+            75,
+            "simulator runtime support files",
+        ),
+        dir_rule(
+            "xcode.devsupport.each",
+            "Library/Developer/Xcode/iOS DeviceSupport",
+            true,
+            prob,
+            85,
+            "debug symbols for one iOS version; copied again when a device of that version connects",
+        ),
+        dir_rule(
+            "xcode.devsupport.watch",
+            "Library/Developer/Xcode/watchOS DeviceSupport",
+            false,
+            prob,
+            85,
+            "debug symbols for Apple Watch; copied again when a watch connects",
+        ),
+        dir_rule(
+            "xcode.devsupport.tv",
+            "Library/Developer/Xcode/tvOS DeviceSupport",
+            false,
+            prob,
+            85,
+            "debug symbols for Apple TV; copied again when one connects",
+        ),
+        dir_rule(
+            "xcode.devsupport.vision",
+            "Library/Developer/Xcode/visionOS DeviceSupport",
+            false,
+            prob,
+            85,
+            "debug symbols for Apple Vision Pro; copied again when one connects",
+        ),
+        dir_rule(
+            "xcode.products",
+            "Library/Developer/Xcode/Products",
+            false,
+            prob,
+            70,
+            "built products Xcode keeps for archives; rebuilt on the next archive",
+        ),
+        dir_rule(
+            "xcode.docs",
+            "Library/Developer/Xcode/DocumentationCache",
+            false,
+            safe,
+            90,
+            "Xcode's documentation cache; rebuilt when you open the docs",
+        ),
+        dir_rule(
+            "xcode.previews",
+            "Library/Developer/Xcode/UserData/Previews",
+            false,
+            safe,
+            90,
+            "SwiftUI preview data; rebuilt when a preview runs",
+        ),
+        dir_rule(
+            "xcode.cache",
+            "Library/Caches/com.apple.dt.Xcode",
+            false,
+            safe,
+            90,
+            "Xcode's cache; rebuilt on demand",
+        ),
+        dir_rule(
+            "xcpg",
+            "Library/Developer/XCPGDevices",
+            false,
+            safe,
+            85,
+            "Xcode Playground simulator devices; recreated when needed",
+        ),
+        abs_rule(
+            "wallpaper.idle",
+            "/Library/Application Support/com.apple.idleassetsd",
+            false,
+            prob,
+            80,
+            "downloaded Aerial screensaver and wallpaper videos; macOS downloads them again if you pick them",
+        ),
+        dir_rule(
+            "wallpaper.user",
+            "Library/Application Support/com.apple.wallpaper/aerials",
+            false,
+            prob,
+            80,
+            "downloaded Aerial wallpaper videos; macOS downloads them again if you pick them",
+        ),
+        abs_rule(
+            "wallpaper.desktop",
+            "/Library/Desktop Pictures",
+            false,
+            prob,
+            60,
+            "extra desktop pictures installed with macOS; the one you use is copied elsewhere",
+        ),
+        abs_rule(
+            "macos.updates",
+            "/Library/Updates",
+            false,
+            prob,
+            85,
+            "downloaded macOS updates; macOS fetches them again",
+        ),
+        abs_rule(
+            "macos.installdata",
+            "/macOS Install Data",
+            false,
+            prob,
+            85,
+            "left over from a macOS upgrade; safe once the upgrade finished",
+        ),
+        abs_rule(
+            "garageband",
+            "/Library/Application Support/GarageBand",
+            false,
+            prob,
+            60,
+            "GarageBand sound library; download it again from inside GarageBand",
+        ),
+        abs_rule(
+            "logic",
+            "/Library/Application Support/Logic",
+            false,
+            prob,
+            60,
+            "Logic Pro sound library; download it again from inside Logic",
+        ),
+        abs_rule(
+            "loops",
+            "/Library/Audio/Apple Loops",
+            false,
+            prob,
+            60,
+            "Apple Loops; GarageBand and Logic download them again",
+        ),
+        dir_rule(
+            "mail.downloads",
+            "Library/Containers/com.apple.mail/Data/Library/Mail Downloads",
+            false,
+            prob,
+            70,
+            "copies of mail attachments you opened; the originals stay in Mail",
+        ),
+        dir_rule(
+            "vscode.cache",
+            "Library/Application Support/Code/CachedData",
+            false,
+            safe,
+            90,
+            "VS Code's compiled-code cache; rebuilt on launch",
+        ),
+        dir_rule(
+            "vscode.vsix",
+            "Library/Application Support/Code/CachedExtensionVSIXs",
+            false,
+            safe,
+            90,
+            "downloaded extension packages; fetched again on update",
+        ),
     ]
 
 fn base_rules() List[Rule]
@@ -398,7 +573,15 @@ fn fits(r Rule, p str, rel str, is_dir bool, mtime_ms int, now_ms int, markers S
         _ => false
 
 ## Does an "abs" rule name this path? Those apply even where `is_protected` does.
-fn abs_fits(rules List[Rule], p str, rel str, is_dir bool, mtime_ms int, now_ms int, markers Set[str]) bool
+fn abs_fits(
+    rules List[Rule],
+    p str,
+    rel str,
+    is_dir bool,
+    mtime_ms int,
+    now_ms int,
+    markers Set[str],
+) bool
     for r in rules
         if r.kind == "abs" and fits(r, p, rel, is_dir, mtime_ms, now_ms, markers)
             return true
@@ -419,7 +602,15 @@ pub fn rate(
     allow_protected bool,
 ) model.Verdict
     rel := relative(p, home)
-    if not allow_protected and is_protected(p, home) and not abs_fits(rules, p, rel, is_dir, mtime_ms, now_ms, markers)
+    if not allow_protected and is_protected(p, home) and not abs_fits(
+        rules,
+        p,
+        rel,
+        is_dir,
+        mtime_ms,
+        now_ms,
+        markers,
+    )
         return model.Verdict.keep(
             "protected",
             99,
@@ -497,7 +688,16 @@ fn rules_protected_system() bool
     v := rated("/Library/Developer/CoreSimulator/Volumes/iOS_22A3351", true, 0, [])
     assert_eq(v.rule, "sim.runtime.vol")
     assert(not v.protected)
-    assert_eq(rated("/Library/Application Support/com.apple.idleassetsd", true, 0, []).rule, "wallpaper.idle")
+    assert_eq(
+        rated("/Library/Application Support/com.apple.idleassetsd", true, 0, []).rule,
+        "wallpaper.idle",
+    )
     assert_eq(rated("/Library/Application Support/Other", true, 0, []).rule, "protected")
-    assert_eq(rated("/Users/u/Library/Developer/CoreSimulator/Devices/ABC", true, 0, []).rule, "sim.device")
-    assert_eq(rated("/Users/u/Library/Developer/Xcode/iOS DeviceSupport/17.0", true, 0, []).rule, "xcode.devsupport.each")
+    assert_eq(
+        rated("/Users/u/Library/Developer/CoreSimulator/Devices/ABC", true, 0, []).rule,
+        "sim.device",
+    )
+    assert_eq(
+        rated("/Users/u/Library/Developer/Xcode/iOS DeviceSupport/17.0", true, 0, []).rule,
+        "xcode.devsupport.each",
+    )

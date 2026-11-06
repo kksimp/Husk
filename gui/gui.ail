@@ -48,7 +48,10 @@ impl app.App for Husk
     fn view(self) app.Node
         f := view.draw(s)
         app.column([
-            app.row([app.field("path", s.path, "Folder to scan, such as ~/Library (~ is your home)"), app.button("go", "Scan")]),
+            app.row([
+                app.field("path", s.path, "Folder to scan, such as ~/Library (~ is your home)"),
+                app.button("go", "Scan"),
+            ]),
             app.canvas("main", 0.0, 0.0, f.ops),
         ])
 
@@ -114,11 +117,27 @@ fn roots_of(id str) List[str]
 
 fn targets() List[view.Target]
     [
-        view.Target(id: "smart", label: "Smart scan", detail: "Home, /Library and Applications: caches, Xcode data, simulators, wallpapers, installers"),
+        view.Target(
+            id: "smart",
+            label: "Smart scan",
+            detail: "Home, /Library and Applications: caches, Xcode data, simulators, wallpapers, installers",
+        ),
         view.Target(id: "home", label: "Home folder", detail: "Everything in your user folder"),
-        view.Target(id: "dev", label: "Xcode and simulators", detail: "~/Library/Developer: DerivedData, device support, simulator devices"),
-        view.Target(id: "library", label: "Library", detail: "~/Library: app caches, logs, containers"),
-        view.Target(id: "disk", label: "Whole disk", detail: "Every user, /Library, Applications; not macOS system files"),
+        view.Target(
+            id: "dev",
+            label: "Xcode and simulators",
+            detail: "~/Library/Developer: DerivedData, device support, simulator devices",
+        ),
+        view.Target(
+            id: "library",
+            label: "Library",
+            detail: "~/Library: app caches, logs, containers",
+        ),
+        view.Target(
+            id: "disk",
+            label: "Whole disk",
+            detail: "Every user, /Library, Applications; not macOS system files",
+        ),
     ]
 
 ## Asks the scan task to scan a target id or a folder path, unless a scan is running.
@@ -224,7 +243,12 @@ fn Husk.key(mut self, name str)
         go(s.m.entries[s.cur].parent)
 
 fn fresh() Husk
-    mut h := Husk(s: view.State.new(mock.mock()), done: Channel[mock.Model](1), reqs: Channel[Req](1), last: "home")
+    mut h := Husk(
+        s: view.State.new(mock.mock()),
+        done: Channel[mock.Model](1),
+        reqs: Channel[Req](1),
+        last: "home",
+    )
     h.s.scanned = true
     h.s.targets = targets()
     h
