@@ -113,7 +113,7 @@ pub fn tree(s scan.Scan, label str, home str, now_ms int, min_bytes int) mock.Mo
             age_of(mtime, now_ms),
         )
         m.entries[id].path = p
-        m.entries[id].icloud = p.contains("/Library/Mobile Documents/")
+        m.entries[id].icloud = maybe_cloud(p, home)
         at[p] = id
     m
 
@@ -150,3 +150,8 @@ pub fn merge(parts List[scan.Scan]) scan.Scan
         errors.extend(p.errors)
         total += p.total
     scan.Scan(root: "", files: files, dirs: dirs, total: total, errors: errors)
+
+## Could `p` be in iCloud Drive? Drive itself, or Desktop and Documents, which iCloud can sync
+## from their usual place. Offloading checks, so a wrong guess just falls back to the Trash.
+fn maybe_cloud(p str, home str) bool
+    p.contains("/Library/Mobile Documents/") or p.starts_with("{home}/Desktop/") or p.starts_with("{home}/Documents/")

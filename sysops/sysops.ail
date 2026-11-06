@@ -14,6 +14,24 @@ fn evict_one(p str) str
 ## Offloads `p`: removes the copy on this Mac and keeps the file in iCloud
 ## (`brctl evict`). It downloads again when opened. A folder that brctl refuses
 ## is offloaded file by file; the reason names the first file that failed.
+## What `evict_file` returns for a file that is not stored in iCloud at all.
+pub NOT_CLOUD := "not in iCloud"
+
+## Offloads one file and checks that it worked: afterwards `ls -O` must show the
+## `dataless` flag. A file that is not in iCloud is left alone and reported as NOT_CLOUD.
+pub fn evict_file(p str) str
+    first := evict_one(p)
+    if first != ""
+        return "could not offload {path.base(p)}: {first}"
+    r := proc.run("/bin/ls", ["-lOd", p], "", 20000) else err
+        return ""
+    if r.text().contains("dataless")
+        return ""
+    NOT_CLOUD
+
+## Offloads `p`: removes the copy on this Mac and keeps the file in iCloud
+## (`brctl evict`). It downloads again when opened. A folder that brctl refuses
+## is offloaded file by file; the reason names the first file that failed.
 pub fn evict(p str) str
     first := evict_one(p)
     if first == ""

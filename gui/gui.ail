@@ -239,14 +239,15 @@ fn Husk.trash(mut self)
             continue
         real = true
         if e.icloud and not s.cloud_delete
-            bad := sysops.evict(e.path)
+            bad := if e.is_dir then sysops.evict(e.path) else sysops.evict_file(e.path)
             if bad == ""
                 s.gone.add(id)
                 offloaded += 1
-            else
+                continue
+            if bad != sysops.NOT_CLOUD
                 log.warn("offload failed: {e.path}: {bad}")
                 why = bad
-            continue
+                continue
         fs.trash(e.path) else err
             if denied("{err}")
                 need.push(id)
