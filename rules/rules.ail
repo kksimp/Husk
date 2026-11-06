@@ -265,6 +265,9 @@ fn macos_rules() List[Rule]
             70,
             "copies of mail attachments you opened; the originals stay in Mail",
         ),
+        glob_rule("macapk.code", "Library/Application Support/macapk/*/.macapk/code", true, prob, 60, "extracted code of an Android app run by macapk; macapk most likely extracts it again from the APK, but check that the APK is still around"),
+        suffix_rule("android.avd.dir", ".avd", prob, 70, "an Android emulator device; recreate it in Android Studio's Device Manager"),
+        name_rule("android.images.any", "system-images", "", prob, 75, "Android emulator system images; sdkmanager downloads them again"),
         dir_rule("android.avd", ".android/avd", true, prob, 70, "one Android emulator device: its disk image and apps; recreate it in Android Studio's Device Manager"),
         dir_rule("android.cache", ".android/cache", false, safe, 90, "Android tools' download cache"),
         dir_rule("android.images", "Library/Android/sdk/system-images", true, prob, 80, "an Android emulator system image; sdkmanager downloads it again"),
@@ -290,6 +293,14 @@ fn macos_rules() List[Rule]
             "downloaded extension packages; fetched again on update",
         ),
     ]
+
+## kind "glob": a home-relative path where "*" stands for any one folder name
+## (expand: each direct child). kind "suffix": a folder whose name ends with the pattern.
+fn glob_rule(id str, pattern str, expand bool, rating model.Rating, confidence int, reason str) Rule
+    rule(id, "glob", pattern, "", 0, "", expand, rating, confidence, reason, true)
+
+fn suffix_rule(id str, suffix str, rating model.Rating, confidence int, reason str) Rule
+    rule(id, "suffix", suffix, "", 0, "", false, rating, confidence, reason, true)
 
 fn base_rules() List[Rule]
     safe := model.Rating.Safe
@@ -564,6 +575,12 @@ fn fits(r Rule, p str, rel str, is_dir bool, mtime_ms int, now_ms int, markers S
             if not is_dir or path.base(p) != r.pattern
                 return false
             r.needs == "" or markers.contains("{path.dir(p)}/{r.needs}")
+        "glob" =>
+            if not is_dir
+                return false
+            matches_glob(if r.expand then path.dir(rel) else rel, r.pattern)
+        "suffix" =>
+            is_dir and path.base(p).ends_with(r.pattern)
         "abs" =>
             if not is_dir
                 return false
@@ -580,7 +597,19 @@ fn fits(r Rule, p str, rel str, is_dir bool, mtime_ms int, now_ms int, markers S
             age >= r.min_age_days and r.pattern.split("|").contains(path.ext(p).to_lower())
         _ => false
 
-## Does an "abs" rule name this path? Those apply even where `is_protected` does.
+## Does `rel` match `pattern`, folder by folder, where a `*` folder matches any one name?
+fn matches_glob(rel str, pattern str) bool
+    a := rel.split("/")
+    b := pattern.split("/")
+    if a.len() != b.len()
+        return false
+    for i in 0..a.len()
+        if b[i] != "*" and a[i] != b[i]
+            return false
+    true
+
+## Does an "abs" rule or an Android SDK rule name this path? Those apply even where
+## `is_protected` does: SDKs and emulator images are re-downloadable wherever they sit.
 fn abs_fits(
     rules List[Rule],
     p str,
@@ -591,7 +620,7 @@ fn abs_fits(
     markers Set[str],
 ) bool
     for r in rules
-        if r.kind == "abs" and fits(r, p, rel, is_dir, mtime_ms, now_ms, markers)
+        if (r.kind == "abs" or r.id.starts_with("android.")) and fits(r, p, rel, is_dir, mtime_ms, now_ms, markers)
             return true
     false
 
@@ -709,3 +738,10 @@ fn rules_protected_system() bool
         rated("/Users/u/Library/Developer/Xcode/iOS DeviceSupport/17.0", true, 0, []).rule,
         "xcode.devsupport.each",
     )
+
+@test fn macapk_code_and_odd_android_sdks_are_found()
+    assert_eq(rated("/Users/u/Library/Application Support/macapk/com.x/.macapk/code/com.x_1", true, 0, []).rule, "macapk.code")
+    assert_eq(rated("/Users/u/Library/Application Support/macapk/com.x/data", true, 0, []).rule, "none")
+    assert_eq(rated("/Users/u/Documents/Projects/Macapk/sdk/system-images", true, 0, []).rule, "android.images.any")
+    assert_eq(rated("/Users/u/code/sdk/system-images", true, 0, []).rule, "android.images.any")
+    assert_eq(rated("/Users/u/code/Pixel_8.avd", true, 0, []).rule, "android.avd.dir")

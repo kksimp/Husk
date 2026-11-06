@@ -38,7 +38,7 @@ fn cat_of(rule str) str
         "loops",
     ].contains(rule)
         return "system"
-    if rule.starts_with("vscode") or rule.starts_with("xcpg") or rule.starts_with("android")
+    if rule.starts_with("vscode") or rule.starts_with("xcpg") or rule.starts_with("android") or rule.starts_with("macapk")
         return "dev"
     if rule == "lib.logs"
         return "logs"

@@ -7,6 +7,7 @@
 ## once. The scan runs in a task, so the window stays responsive.
 
 use std.app
+use std.log
 use mock
 use view
 use bridge
@@ -243,12 +244,14 @@ fn Husk.trash(mut self)
                 s.gone.add(id)
                 offloaded += 1
             else
+                log.warn("offload failed: {e.path}: {bad}")
                 why = bad
             continue
         fs.trash(e.path) else err
             if denied("{err}")
                 need.push(id)
             else
+                log.warn("trash failed: {e.path}: {err}")
                 why = "{err}"
             continue
         s.gone.add(id)
