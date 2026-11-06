@@ -113,6 +113,7 @@ pub fn tree(s scan.Scan, label str, home str, now_ms int, min_bytes int) mock.Mo
             age_of(mtime, now_ms),
         )
         m.entries[id].path = p
+        m.entries[id].icloud = p.contains("/Library/Mobile Documents/")
         at[p] = id
     m
 

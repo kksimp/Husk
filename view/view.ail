@@ -39,6 +39,10 @@ pub struct State
     pub targets List[Target]
     ## The folder field's text.
     pub path str
+    ## Also delete iCloud items from iCloud, not just offload them.
+    pub cloud_delete bool
+    ## Entries that need administrator rights to remove; non-empty shows the admin sheet.
+    pub admin List[int]
 
 ## A rectangle that reacts to a click. `kind` says what; `k` is an entry id or
 ## index, `arg` a filter or sort key.
@@ -84,6 +88,8 @@ pub fn State.new(m mock.Model) State
         scanned: false,
         targets: [],
         path: "",
+        cloud_delete: false,
+        admin: [],
     )
 
 ## The ids the list and treemap show, in the order the user sorted them.
@@ -646,7 +652,11 @@ fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
     top := mock.top_marks(s.m, s.marks)
     shown := top.take(8)
     pw := (s.w - 60.0).min(560.0)
-    ph := 190.0 + shown.len().to_float() * 30.0
+    mut cloud := 0
+    for id in top
+        if s.m.entries[id].icloud
+            cloud += 1
+    ph := 190.0 + shown.len().to_float() * 30.0 + (if cloud > 0 then 64.0 else 0.0)
     px := (s.w - pw) / 2.0
     py := ((s.h - ph) / 2.0).max(20.0)
     # No alpha in the display list, so the sheet is a bordered panel over the window.
@@ -714,6 +724,26 @@ fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
             11.0,
             false,
         ))
+    if cloud > 0
+        cy := by - 70.0
+        ops.push(look.text(
+            px + 24.0,
+            cy,
+            look.fit("{cloud} in iCloud Drive: only the copy on this Mac is removed. They stay in iCloud.", pw - 48.0, 11.0),
+            look.SAFE,
+            11.0,
+            false,
+        ))
+        check(mut ops, px + 24.0, cy + 22.0, s.cloud_delete, look.PANEL)
+        ops.push(look.text(
+            px + 48.0,
+            cy + 22.0,
+            look.fit("Also delete them from iCloud (they vanish on all your devices)", pw - 72.0, 11.0),
+            if s.cloud_delete then look.KEEP else look.DIM,
+            11.0,
+            false,
+        ))
+        reg(mut regs, px + 20.0, cy + 18.0, pw - 40.0, 24.0, "cloudbox", 0, "")
     button(
         mut ops,
         mut regs,
@@ -736,6 +766,25 @@ fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
         look.PANEL,
         "trash",
     )
+
+## Asks before deleting what the user's account can't: macOS shows its own password prompt.
+fn admin_sheet(s State, mut ops List[app.Op], mut regs List[Region])
+    reg(mut regs, 0.0, 0.0, s.w, s.h, "scrim", 0, "")
+    pw := (s.w - 60.0).min(520.0)
+    shown := s.admin.take(4)
+    ph := 190.0 + shown.len().to_float() * 22.0
+    px := (s.w - pw) / 2.0
+    py := ((s.h - ph) / 2.0).max(20.0)
+    look.round(mut ops, px - 1.0, py - 1.0, pw + 2.0, ph + 2.0, 13.0, look.LINE, look.BG)
+    look.round(mut ops, px, py, pw, ph, 12.0, look.PANEL, look.LINE)
+    ops.push(look.text(px + 24.0, py + 20.0, "Administrator permission needed", look.TEXT, 16.0, true))
+    ops.push(look.text(px + 24.0, py + 46.0, look.fit("{s.admin.len()} items belong to the system or another user, so your account can't remove them.", pw - 48.0, 11.0), look.DIM, 11.0, false))
+    ops.push(look.text(px + 24.0, py + 64.0, look.fit("macOS asks for your password. They are deleted for good, not moved to the Trash.", pw - 48.0, 11.0), look.REVIEW, 11.0, false))
+    for n, id in shown.enumerate()
+        ops.push(look.text(px + 24.0, py + 90.0 + n.to_float() * 22.0, look.fit(s.m.entries[id].path, pw - 48.0, 12.0), look.TEXT, 12.0, false))
+    by := py + ph - 52.0
+    button(mut ops, mut regs, px + pw - 24.0 - 170.0 - 10.0 - 80.0, by + 8.0, 80.0, "Cancel", false, look.PANEL, "cancel")
+    button(mut ops, mut regs, px + pw - 24.0 - 170.0, by + 8.0, 170.0, "Allow with password", true, look.PANEL, "admin_go")
 
 ## The whole frame for a window of `s.w` by `s.h`.
 ## The first screen: pick what to scan.
@@ -832,7 +881,9 @@ pub fn draw(s State) Frame
     sidebar(s, mut ops, mut regs)
     detail(s, mut ops, det_y)
     footer(s, mut ops, mut regs, foot_y)
-    if s.sheet
+    if s.sheet and not s.admin.is_empty()
+        admin_sheet(s, mut ops, mut regs)
+    elif s.sheet
         sheet(s, mut ops, mut regs)
     Frame(ops: ops, regs: regs)
 

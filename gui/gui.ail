@@ -11,6 +11,7 @@ use mock
 use view
 use bridge
 use scan
+use sysops
 
 ## What to scan: the roots, and the name of the top entry of the result.
 struct Req
@@ -195,25 +196,58 @@ fn Husk.click(mut self, x float, y float)
         "review" =>
             if not s.marks.is_empty()
                 s.sheet = true
-        "cancel" => s.sheet = false
+        "cancel" => cancel()
+        "cloudbox" => s.cloud_delete = not s.cloud_delete
+        "admin_go" => admin_go()
         "trash" => trash()
         "undo" => undo()
         _ => return
 
-## Moves the marked entries to the Trash with `fs.trash` (ADR 0929). A real entry that fails stays; the footer says why.
-## Mock entries (no path) are only hidden, and Undo shows them again.
+## Did the failure come from permissions? (fs.trash gives the OS's words.)
+fn denied(text str) bool
+    t := text.to_lower()
+    t.contains("permission") or t.contains("denied") or t.contains("not permitted") or t.contains("read-only")
+
+## Cancel on a sheet: the admin sheet skips its items, the review sheet just closes.
+fn Husk.cancel(mut self)
+    if not s.admin.is_empty()
+        s.notice = "Skipped {s.admin.len()} items that need administrator permission."
+        s.admin = []
+    s.sheet = false
+
+## Moves the marked entries out of the way. An item in iCloud Drive is offloaded
+## (this Mac's copy goes, iCloud keeps the file) unless the sheet's box says to delete it from
+## iCloud too. Everything else goes to the Trash with `fs.trash` (ADR 0929). An item
+## the account may not remove waits for the admin sheet. Mock entries (no path) are only
+## hidden, and Undo shows them again.
 fn Husk.trash(mut self)
     ids := mock.top_marks(s.m, s.marks)
     mut moved := List[int]()
-    mut why := ""
+    mut need := List[int]()
+    mut offloaded := 0
     mut real := false
+    mut why := ""
     for id in ids
-        p := s.m.entries[id].path
-        if p != ""
-            real = true
-            fs.trash(p) else err
+        e := s.m.entries[id]
+        if e.path == ""
+            s.gone.add(id)
+            moved.push(id)
+            continue
+        real = true
+        if e.icloud and not s.cloud_delete
+            bad := sysops.evict(e.path)
+            if bad == ""
+                s.gone.add(id)
+                offloaded += 1
+            else
+                why = bad
+            continue
+        fs.trash(e.path) else err
+            if denied("{err}")
+                need.push(id)
+            else
                 why = "{err}"
-                continue
+            continue
         s.gone.add(id)
         moved.push(id)
     s.undo = List[int]()
@@ -221,13 +255,33 @@ fn Husk.trash(mut self)
     if not real
         s.undo = moved
     elif why == ""
-        s.notice = "Moved {moved.len()} items to the Trash. Use Put Back in Finder to restore them."
+        s.notice = "Moved {moved.len()} to the Trash (Put Back in Finder restores them). Offloaded {offloaded} to iCloud."
     s.marks = {}
-    s.sheet = false
     s.sel = -1
     s.eff = mock.sizes(s.m, s.gone)
     if s.eff[s.cur] <= 0
         s.cur = 0
+    s.admin = need
+    s.sheet = not need.is_empty()
+    s.cloud_delete = false
+
+## The admin sheet's Allow: delete the waiting items with one macOS password prompt.
+fn Husk.admin_go(mut self)
+    mut paths := List[str]()
+    for id in s.admin
+        paths.push(s.m.entries[id].path)
+    bad := sysops.remove_admin(paths)
+    if bad == ""
+        for id in s.admin
+            s.gone.add(id)
+        s.notice = "Deleted {s.admin.len()} items with administrator permission."
+        s.eff = mock.sizes(s.m, s.gone)
+        if s.eff[s.cur] <= 0
+            s.cur = 0
+    else
+        s.notice = bad
+    s.admin = []
+    s.sheet = false
 
 fn Husk.undo(mut self)
     for id in s.undo
@@ -356,3 +410,17 @@ pub fn run(root str)
     assert_eq(h.s.path, "/tmp/x")
     assert(h.s.pct < 1.0)
     assert_eq(h.last, "/tmp/x")
+
+@test fn denied_reads_the_operating_systems_words()
+    assert(denied("Permission denied"))
+    assert(denied("Operation not permitted"))
+    assert(not denied("no such file"))
+
+@test fn cancel_on_the_admin_sheet_skips_its_items()
+    mut h := fresh()
+    h.s.admin = [1, 2]
+    h.s.sheet = true
+    h.cancel()
+    assert(h.s.admin.is_empty())
+    assert(not h.s.sheet)
+    assert(h.s.notice.contains("2 items"))
