@@ -6,7 +6,7 @@
 ## Offloads `p`: removes the copy on this Mac and keeps the file in iCloud
 ## (`brctl evict`). It downloads again when opened.
 pub fn evict(p str) str
-    r := proc.run("/usr/bin/brctl", ["evict", p], timeout_ms: 120000) else err
+    r := proc.run("/usr/bin/brctl", ["evict", p], "", 120000) else err
         return "could not offload {path.base(p)}: {err}"
     if r.ok()
         return ""
@@ -39,7 +39,7 @@ pub fn remove_admin(paths List[str]) str
     for p in paths
         if not safe_to_remove(p)
             return "refusing to delete {p} with administrator rights"
-    r := proc.run("/usr/bin/osascript", ["-e", script(paths)], timeout_ms: 300000) else err
+    r := proc.run("/usr/bin/osascript", ["-e", script(paths)], "", 300000) else err
         return "administrator delete failed: {err}"
     if r.ok()
         return ""

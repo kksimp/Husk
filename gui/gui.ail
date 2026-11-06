@@ -206,7 +206,10 @@ fn Husk.click(mut self, x float, y float)
 ## Did the failure come from permissions? (fs.trash gives the OS's words.)
 fn denied(text str) bool
     t := text.to_lower()
-    t.contains("permission") or t.contains("denied") or t.contains("not permitted") or t.contains("read-only")
+    t.contains("permission")
+        or t.contains("denied")
+        or t.contains("not permitted")
+        or t.contains("read-only")
 
 ## Cancel on a sheet: the admin sheet skips its items, the review sheet just closes.
 fn Husk.cancel(mut self)

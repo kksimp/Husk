@@ -729,7 +729,11 @@ fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
         ops.push(look.text(
             px + 24.0,
             cy,
-            look.fit("{cloud} in iCloud Drive: only the copy on this Mac is removed. They stay in iCloud.", pw - 48.0, 11.0),
+            look.fit(
+                "{cloud} in iCloud Drive: only the copy on this Mac is removed. They stay in iCloud.",
+                pw - 48.0,
+                11.0,
+            ),
             look.SAFE,
             11.0,
             false,
@@ -738,7 +742,11 @@ fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
         ops.push(look.text(
             px + 48.0,
             cy + 22.0,
-            look.fit("Also delete them from iCloud (they vanish on all your devices)", pw - 72.0, 11.0),
+            look.fit(
+                "Also delete them from iCloud (they vanish on all your devices)",
+                pw - 72.0,
+                11.0,
+            ),
             if s.cloud_delete then look.KEEP else look.DIM,
             11.0,
             false,
@@ -777,14 +785,70 @@ fn admin_sheet(s State, mut ops List[app.Op], mut regs List[Region])
     py := ((s.h - ph) / 2.0).max(20.0)
     look.round(mut ops, px - 1.0, py - 1.0, pw + 2.0, ph + 2.0, 13.0, look.LINE, look.BG)
     look.round(mut ops, px, py, pw, ph, 12.0, look.PANEL, look.LINE)
-    ops.push(look.text(px + 24.0, py + 20.0, "Administrator permission needed", look.TEXT, 16.0, true))
-    ops.push(look.text(px + 24.0, py + 46.0, look.fit("{s.admin.len()} items belong to the system or another user, so your account can't remove them.", pw - 48.0, 11.0), look.DIM, 11.0, false))
-    ops.push(look.text(px + 24.0, py + 64.0, look.fit("macOS asks for your password. They are deleted for good, not moved to the Trash.", pw - 48.0, 11.0), look.REVIEW, 11.0, false))
+    ops.push(look.text(
+        px + 24.0,
+        py + 20.0,
+        "Administrator permission needed",
+        look.TEXT,
+        16.0,
+        true,
+    ))
+    ops.push(look.text(
+        px + 24.0,
+        py + 46.0,
+        look.fit(
+            "{s.admin.len()} items belong to the system or another user, so your account can't remove them.",
+            pw - 48.0,
+            11.0,
+        ),
+        look.DIM,
+        11.0,
+        false,
+    ))
+    ops.push(look.text(
+        px + 24.0,
+        py + 64.0,
+        look.fit(
+            "macOS asks for your password. They are deleted for good, not moved to the Trash.",
+            pw - 48.0,
+            11.0,
+        ),
+        look.REVIEW,
+        11.0,
+        false,
+    ))
     for n, id in shown.enumerate()
-        ops.push(look.text(px + 24.0, py + 90.0 + n.to_float() * 22.0, look.fit(s.m.entries[id].path, pw - 48.0, 12.0), look.TEXT, 12.0, false))
+        ops.push(look.text(
+            px + 24.0,
+            py + 90.0 + n.to_float() * 22.0,
+            look.fit(s.m.entries[id].path, pw - 48.0, 12.0),
+            look.TEXT,
+            12.0,
+            false,
+        ))
     by := py + ph - 52.0
-    button(mut ops, mut regs, px + pw - 24.0 - 170.0 - 10.0 - 80.0, by + 8.0, 80.0, "Cancel", false, look.PANEL, "cancel")
-    button(mut ops, mut regs, px + pw - 24.0 - 170.0, by + 8.0, 170.0, "Allow with password", true, look.PANEL, "admin_go")
+    button(
+        mut ops,
+        mut regs,
+        px + pw - 24.0 - 170.0 - 10.0 - 80.0,
+        by + 8.0,
+        80.0,
+        "Cancel",
+        false,
+        look.PANEL,
+        "cancel",
+    )
+    button(
+        mut ops,
+        mut regs,
+        px + pw - 24.0 - 170.0,
+        by + 8.0,
+        170.0,
+        "Allow with password",
+        true,
+        look.PANEL,
+        "admin_go",
+    )
 
 ## The whole frame for a window of `s.w` by `s.h`.
 ## The first screen: pick what to scan.
