@@ -18,7 +18,7 @@ pub fn evict(p str) str
     first := evict_one(p)
     if first == ""
         return ""
-    names := fs.walk(p) else
+    names := fs.walk(p) else err
         return "could not offload {path.base(p)}: {first}"
     mut failed := 0
     mut why := first
