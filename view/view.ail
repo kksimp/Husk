@@ -7,6 +7,12 @@ use mock
 use treemap
 use look
 
+## A place Husk can scan: `id` is what a click sends, `detail` says what it finds.
+pub struct Target
+    pub id str
+    pub label str
+    pub detail str
+
 ## Everything the window needs to remember.
 pub struct State
     pub m mock.Model
@@ -28,6 +34,11 @@ pub struct State
     pub scan_note str
     ## A line for the footer, such as why a move to the Trash failed.
     pub notice str
+    ## False until the first scan finishes: the window then shows the welcome page.
+    pub scanned bool
+    pub targets List[Target]
+    ## The folder field's text.
+    pub path str
 
 ## A rectangle that reacts to a click. `kind` says what; `k` is an entry id or
 ## index, `arg` a filter or sort key.
@@ -70,6 +81,9 @@ pub fn State.new(m mock.Model) State
         pct: 1.0,
         scan_note: "",
         notice: "",
+        scanned: false,
+        targets: [],
+        path: "",
     )
 
 ## The ids the list and treemap show, in the order the user sorted them.
@@ -195,6 +209,9 @@ fn sidebar(s State, mut ops List[app.Op], mut regs List[Region])
     rect(mut ops, SIDE_W - 1.0, 0.0, 1.0, s.h, look.LINE)
     ops.push(look.text(20.0, 18.0, "Husk", look.TEXT, 20.0, true))
     ops.push(look.text(20.0, 44.0, "What is using your disk", look.DIM, 11.0, false))
+    if not s.scanned
+        sidebar_targets(s, mut ops, mut regs)
+        return
     # The volume card.
     ops.push(look.text(20.0, 82.0, "Macintosh HD", look.TEXT, 12.0, true))
     bw := SIDE_W - 40.0
@@ -218,6 +235,7 @@ fn sidebar(s State, mut ops List[app.Op], mut regs List[Region])
                 false,
             ))
         sidebar_nav(s, mut ops, mut regs)
+        sidebar_targets(s, mut ops, mut regs)
         return
     look.round(mut ops, 20.0, 104.0, bw, 8.0, 4.0, look.mix(look.SIDE, 0xffffff, 0.12), look.SIDE)
     used := s.m.vol_used.to_float() / s.m.vol_total.to_float()
@@ -246,6 +264,18 @@ fn sidebar(s State, mut ops List[app.Op], mut regs List[Region])
             false,
         ))
     sidebar_nav(s, mut ops, mut regs)
+    sidebar_targets(s, mut ops, mut regs)
+
+## "Scan" entries pinned to the bottom of the sidebar.
+fn sidebar_targets(s State, mut ops List[app.Op], mut regs List[Region])
+    mut y := s.h - 30.0 * s.targets.len().to_float() - 34.0
+    rect(mut ops, 10.0, y - 8.0, SIDE_W - 20.0, 1.0, look.LINE)
+    ops.push(look.text(20.0, y + 4.0, "SCAN", look.DIM, 10.0, true))
+    y += 24.0
+    for t in s.targets
+        ops.push(look.text(22.0, y + 7.0, t.label, 0xd1d1d6, 12.0, false))
+        reg(mut regs, 10.0, y, SIDE_W - 20.0, 28.0, "target", 0, t.id)
+        y += 30.0
 
 fn sidebar_nav(s State, mut ops List[app.Op], mut regs List[Region])
     mut y := 184.0
@@ -708,9 +738,36 @@ fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
     )
 
 ## The whole frame for a window of `s.w` by `s.h`.
+## The first screen: pick what to scan.
+fn welcome(s State, mut ops List[app.Op], mut regs List[Region])
+    x0 := SIDE_W + 40.0
+    ops.push(look.text(x0, 90.0, "What is using your disk?", look.TEXT, 24.0, true))
+    scanning := s.pct < 1.0
+    if scanning
+        ops.push(look.text(x0, 130.0, "Scanning…", look.ACCENT, 14.0, true))
+        ops.push(look.text(x0, 154.0, look.fit(s.scan_note, s.w - x0 - 40.0, 12.0), look.DIM, 12.0, false))
+        ops.push(look.text(x0, 178.0, "Big folders take a minute. The window fills in when the scan is done.", look.DIM, 12.0, false))
+        return
+    ops.push(look.text(x0, 126.0, "Pick a place to scan. Husk sizes everything in it and says what is safe to delete.", look.DIM, 13.0, false))
+    if s.notice != ""
+        ops.push(look.text(x0, 150.0, look.fit(s.notice, s.w - x0 - 40.0, 12.0), look.REVIEW, 12.0, true))
+    mut y := 184.0
+    cw := (s.w - x0 - 40.0).min(620.0)
+    for n, t in s.targets.enumerate()
+        look.round(mut ops, x0, y, cw, 58.0, 10.0, if n == 0 then look.mix(look.BG, look.ACCENT, 0.3) else look.PANEL, look.BG)
+        ops.push(look.text(x0 + 18.0, y + 10.0, t.label, look.TEXT, 14.0, true))
+        ops.push(look.text(x0 + 18.0, y + 32.0, look.fit(t.detail, cw - 36.0, 12.0), look.DIM, 12.0, false))
+        reg(mut regs, x0, y, cw, 58.0, "target", 0, t.id)
+        y += 68.0
+    ops.push(look.text(x0, y + 8.0, "Or type a folder above and press Return.", look.DIM, 12.0, false))
+
 pub fn draw(s State) Frame
     mut ops := [app.draw_rect(0.0, 0.0, s.w, s.h, look.BG)]
     mut regs := List[Region]()
+    if not s.scanned
+        welcome(s, mut ops, mut regs)
+        sidebar(s, mut ops, mut regs)
+        return Frame(ops: ops, regs: regs)
     ids := s.shown()
     x0 := SIDE_W
     foot_y := s.h - FOOT_H

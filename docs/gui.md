@@ -18,3 +18,11 @@ One `std.app` canvas (`husk.ail gui`, `view/view.ail`), Safari-style dark like G
 2. std.app: a canvas `move` (hover) event for treemap tooltips; double-click; right-click context menu; alpha in `Fill` for a dimmed sheet backdrop; host-side text measuring is there (std.app.13) and should replace `look.width`.
 
 Not built or run yet: builds happen on Kaleb's machines.
+
+## Scanning (2026-11-06)
+
+The window opens on a welcome page (nothing scanned yet): Smart scan, Home, Xcode and simulators, Library, Whole disk, each a card and a sidebar entry; a folder field plus Scan button above the canvas (Return also scans); `husk.ail gui PATH` scans at once. A scan task takes requests from a channel, so Rescan and the sidebar entries work any time. Several roots (Smart scan) merge under a top entry "This Mac".
+
+macOS cleanup rules (rules/rules.ail `macos_rules`): simulator devices and runtimes (`/Library/Developer/CoreSimulator`), Xcode device support, previews, docs cache, Aerial wallpapers and `/Library/Desktop Pictures`, macOS update leftovers, GarageBand and Logic libraries, Mail Downloads, VS Code caches. Kind `abs` rules apply under `/Library` even though that is protected.
+
+Wanted from ail: a native folder picker for std.app (NSOpenPanel), and scan progress from `fs.scan`.
