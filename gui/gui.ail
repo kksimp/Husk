@@ -27,6 +27,8 @@ struct Husk
     reqs Channel[Req]
     ## The target id of the last scan, for Rescan.
     last str
+    ## A folder dialog is open (std.app.21).
+    picking bool
 
 impl app.App for Husk
     fn update(mut self, ev app.Event)
@@ -42,6 +44,14 @@ impl app.App for Husk
             "edit" if ev.id == "path" => s.path = ev.text
             "submit" if ev.id == "path" => start(s.path)
             "press" if ev.id == "go" => start(s.path)
+            "picked" =>
+                picking = false
+                if ev.text != ""
+                    s.path = ev.text
+                    start(ev.text)
+            "pick_error" =>
+                picking = false
+                s.notice = "{ev.text}. Type the folder in the field instead."
             "external" if ev.id == "scan" => progress(ev.text)
             "external" if ev.id == "scan_done" => finished()
             "external" if ev.id == "scan_failed" => failed(ev.text)
@@ -59,6 +69,11 @@ impl app.App for Husk
 
     fn title(self) str
         "Husk"
+
+    fn pick(self) app.Picker?
+        if picking
+            return app.Picker(id: "folder", prompt: "Choose a folder to scan", folders: true, start: home())
+        none
 
     fn focus(self) str
         if s.scanned
@@ -124,6 +139,7 @@ fn targets() List[view.Target]
             label: "Smart scan",
             detail: "Home, /Library and Applications: caches, Xcode data, simulators, wallpapers, installers",
         ),
+        view.Target(id: "choose", label: "Choose folder…", detail: "Pick any folder in the macOS dialog"),
         view.Target(id: "home", label: "Home folder", detail: "Everything in your user folder"),
         view.Target(
             id: "dev",
@@ -145,6 +161,9 @@ fn targets() List[view.Target]
 ## Asks the scan task to scan a target id or a folder path, unless a scan is running.
 fn Husk.start(mut self, id str)
     t := id.trim()
+    if t == "choose"
+        picking = true
+        return
     if t == "" or s.pct < 1.0
         return
     roots := roots_of(t)
@@ -356,7 +375,7 @@ fn scanner(inbox app.Inbox, reqs Channel[Req], done Channel[mock.Model])
 pub fn run(root str)
     done := Channel[mock.Model](1)
     reqs := Channel[Req](1)
-    mut h := Husk(s: view.State.new(placeholder()), done: done, reqs: reqs, last: "")
+    mut h := Husk(s: view.State.new(placeholder()), done: done, reqs: reqs, last: "", picking: false)
     h.s.targets = targets()
     inbox := app.new_inbox()
     g := TaskGroup()
