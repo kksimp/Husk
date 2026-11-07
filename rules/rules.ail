@@ -265,17 +265,93 @@ fn macos_rules() List[Rule]
             70,
             "copies of mail attachments you opened; the originals stay in Mail",
         ),
-        glob_rule("macapk.code", "Library/Application Support/macapk/*/.macapk/code", true, prob, 60, "extracted code of an Android app run by macapk; macapk most likely extracts it again from the APK, but check that the APK is still around"),
-        suffix_rule("android.avd.dir", ".avd", prob, 70, "an Android emulator device; recreate it in Android Studio's Device Manager"),
-        name_rule("android.images.any", "system-images", "", prob, 75, "Android emulator system images; sdkmanager downloads them again"),
-        dir_rule("android.avd", ".android/avd", true, prob, 70, "one Android emulator device: its disk image and apps; recreate it in Android Studio's Device Manager"),
-        dir_rule("android.cache", ".android/cache", false, safe, 90, "Android tools' download cache"),
-        dir_rule("android.images", "Library/Android/sdk/system-images", true, prob, 80, "an Android emulator system image; sdkmanager downloads it again"),
-        dir_rule("android.platforms", "Library/Android/sdk/platforms", true, prob, 70, "an Android SDK platform; downloaded again when a project needs it"),
-        dir_rule("android.buildtools", "Library/Android/sdk/build-tools", true, prob, 75, "Android build tools; Gradle downloads the version a project asks for"),
-        dir_rule("android.ndk", "Library/Android/sdk/ndk", true, prob, 70, "an Android NDK version; downloaded again when a project needs it"),
-        dir_rule("android.sources", "Library/Android/sdk/sources", false, safe, 85, "Android framework sources for the debugger; sdkmanager downloads them again"),
-        dir_rule("android.intermediates", "Library/Android/sdk/.downloadIntermediates", false, safe, 95, "leftover SDK download pieces"),
+        glob_rule(
+            "macapk.code",
+            "Library/Application Support/macapk/*/.macapk/code",
+            true,
+            prob,
+            60,
+            "extracted code of an Android app run by macapk; macapk most likely extracts it again from the APK, but check that the APK is still around",
+        ),
+        suffix_rule(
+            "android.avd.dir",
+            ".avd",
+            prob,
+            70,
+            "an Android emulator device; recreate it in Android Studio's Device Manager",
+        ),
+        name_rule(
+            "android.images.any",
+            "system-images",
+            "",
+            prob,
+            75,
+            "Android emulator system images; sdkmanager downloads them again",
+        ),
+        dir_rule(
+            "android.avd",
+            ".android/avd",
+            true,
+            prob,
+            70,
+            "one Android emulator device: its disk image and apps; recreate it in Android Studio's Device Manager",
+        ),
+        dir_rule(
+            "android.cache",
+            ".android/cache",
+            false,
+            safe,
+            90,
+            "Android tools' download cache",
+        ),
+        dir_rule(
+            "android.images",
+            "Library/Android/sdk/system-images",
+            true,
+            prob,
+            80,
+            "an Android emulator system image; sdkmanager downloads it again",
+        ),
+        dir_rule(
+            "android.platforms",
+            "Library/Android/sdk/platforms",
+            true,
+            prob,
+            70,
+            "an Android SDK platform; downloaded again when a project needs it",
+        ),
+        dir_rule(
+            "android.buildtools",
+            "Library/Android/sdk/build-tools",
+            true,
+            prob,
+            75,
+            "Android build tools; Gradle downloads the version a project asks for",
+        ),
+        dir_rule(
+            "android.ndk",
+            "Library/Android/sdk/ndk",
+            true,
+            prob,
+            70,
+            "an Android NDK version; downloaded again when a project needs it",
+        ),
+        dir_rule(
+            "android.sources",
+            "Library/Android/sdk/sources",
+            false,
+            safe,
+            85,
+            "Android framework sources for the debugger; sdkmanager downloads them again",
+        ),
+        dir_rule(
+            "android.intermediates",
+            "Library/Android/sdk/.downloadIntermediates",
+            false,
+            safe,
+            95,
+            "leftover SDK download pieces",
+        ),
         dir_rule(
             "vscode.cache",
             "Library/Application Support/Code/CachedData",
@@ -620,7 +696,15 @@ fn abs_fits(
     markers Set[str],
 ) bool
     for r in rules
-        if (r.kind == "abs" or r.id.starts_with("android.")) and fits(r, p, rel, is_dir, mtime_ms, now_ms, markers)
+        if (r.kind == "abs" or r.id.starts_with("android.")) and fits(
+            r,
+            p,
+            rel,
+            is_dir,
+            mtime_ms,
+            now_ms,
+            markers,
+        )
             return true
     false
 
@@ -740,8 +824,22 @@ fn rules_protected_system() bool
     )
 
 @test fn macapk_code_and_odd_android_sdks_are_found()
-    assert_eq(rated("/Users/u/Library/Application Support/macapk/com.x/.macapk/code/com.x_1", true, 0, []).rule, "macapk.code")
-    assert_eq(rated("/Users/u/Library/Application Support/macapk/com.x/data", true, 0, []).rule, "none")
-    assert_eq(rated("/Users/u/Documents/Projects/Macapk/sdk/system-images", true, 0, []).rule, "android.images.any")
+    assert_eq(
+        rated(
+            "/Users/u/Library/Application Support/macapk/com.x/.macapk/code/com.x_1",
+            true,
+            0,
+            [],
+        ).rule,
+        "macapk.code",
+    )
+    assert_eq(
+        rated("/Users/u/Library/Application Support/macapk/com.x/data", true, 0, []).rule,
+        "none",
+    )
+    assert_eq(
+        rated("/Users/u/Documents/Projects/Macapk/sdk/system-images", true, 0, []).rule,
+        "android.images.any",
+    )
     assert_eq(rated("/Users/u/code/sdk/system-images", true, 0, []).rule, "android.images.any")
     assert_eq(rated("/Users/u/code/Pixel_8.avd", true, 0, []).rule, "android.avd.dir")

@@ -72,7 +72,12 @@ impl app.App for Husk
 
     fn pick(self) app.Picker?
         if picking
-            return app.Picker(id: "folder", prompt: "Choose a folder to scan", folders: true, start: home())
+            return app.Picker(
+                id: "folder",
+                prompt: "Choose a folder to scan",
+                folders: true,
+                start: home(),
+            )
         none
 
     fn focus(self) str
@@ -139,7 +144,11 @@ fn targets() List[view.Target]
             label: "Smart scan",
             detail: "Home, /Library and Applications: caches, Xcode data, simulators, wallpapers, installers",
         ),
-        view.Target(id: "choose", label: "Choose folder…", detail: "Pick any folder in the macOS dialog"),
+        view.Target(
+            id: "choose",
+            label: "Choose folder…",
+            detail: "Pick any folder in the macOS dialog",
+        ),
         view.Target(id: "home", label: "Home folder", detail: "Everything in your user folder"),
         view.Target(
             id: "dev",
@@ -376,7 +385,13 @@ fn scanner(inbox app.Inbox, reqs Channel[Req], done Channel[mock.Model])
 pub fn run(root str)
     done := Channel[mock.Model](1)
     reqs := Channel[Req](1)
-    mut h := Husk(s: view.State.new(placeholder()), done: done, reqs: reqs, last: "", picking: false)
+    mut h := Husk(
+        s: view.State.new(placeholder()),
+        done: done,
+        reqs: reqs,
+        last: "",
+        picking: false,
+    )
     h.s.targets = targets()
     inbox := app.new_inbox()
     g := TaskGroup()

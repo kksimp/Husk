@@ -38,7 +38,10 @@ fn cat_of(rule str) str
         "loops",
     ].contains(rule)
         return "system"
-    if rule.starts_with("vscode") or rule.starts_with("xcpg") or rule.starts_with("android") or rule.starts_with("macapk")
+    if rule.starts_with("vscode")
+        or rule.starts_with("xcpg")
+        or rule.starts_with("android")
+        or rule.starts_with("macapk")
         return "dev"
     if rule == "lib.logs"
         return "logs"
@@ -154,4 +157,6 @@ pub fn merge(parts List[scan.Scan]) scan.Scan
 ## Could `p` be in iCloud Drive? Drive itself, or Desktop and Documents, which iCloud can sync
 ## from their usual place. Offloading checks, so a wrong guess just falls back to the Trash.
 fn maybe_cloud(p str, home str) bool
-    p.contains("/Library/Mobile Documents/") or p.starts_with("{home}/Desktop/") or p.starts_with("{home}/Documents/")
+    p.contains("/Library/Mobile Documents/")
+        or p.starts_with("{home}/Desktop/")
+        or p.starts_with("{home}/Documents/")
