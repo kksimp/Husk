@@ -328,6 +328,7 @@ fn fresh() Husk
         done: Channel[mock.Model](1),
         reqs: Channel[Req](1),
         last: "home",
+        picking: false,
     )
     h.s.scanned = true
     h.s.targets = targets()
