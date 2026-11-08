@@ -120,13 +120,15 @@ fn Husk.handle(mut self, ev app.Event)
         "external" if ev.id == "scan_failed" => failed(ev.text)
         _ => return
 
-## A scan update from the scanner: `pct|files|path`.
+## A scan update from the scanner: `pct|files|bytes|path`.
 fn Husk.progress(mut self, text str)
     parts := text.split("|")
-    if parts.len() < 3
+    if parts.len() < 4
         return
-    s.pct = (parts[0].to_float() else 1.0).max(0.0).min(1.0)
-    s.scan_note = "{parts[1]} files · {parts[2]}"
+    s.pct = (parts[0].to_float() else 1.0).max(0.02).min(0.99)
+    files := parts[1].to_int() else 0
+    bytes := parts[2].to_int() else 0
+    s.scan_note = "{mock.fmt_size(bytes)} · {files} items · {parts[3]}"
 
 ## The scan task is done: take its tree.
 fn Husk.finished(mut self)
@@ -517,26 +519,60 @@ fn placeholder() mock.Model
     m
 
 ## The scan task: for each request, scan its roots, build the tree, tell the window.
+## How often the progress bar moves while a scan runs.
+TICK_MS := 150
+
+## While `stop` is 0, posts what the scans have listed since `base` (fs.scan_count,
+## ADR 0992): against `expected` bytes when known, else as root `i` of `n`.
+fn ticker(inbox app.Inbox, stop Atomic[int], base fs.ScanCount, expected int, i int, n int, root str)
+    while stop.load() == 0
+        c := fs.scan_count()
+        items := c.entries - base.entries
+        bytes := c.bytes - base.bytes
+        pct := if expected > 0 then bytes.to_float() / expected.to_float() else (i.to_float() + 0.5) / n.to_float()
+        inbox.post(app.external("scan", "{pct}|{items}|{bytes}|{root}"))
+        time.sleep_ms(TICK_MS)
+
+## The bytes a request will probably list: the last scan of the same roots, else the
+## volume's used bytes for a whole-disk scan, else 0 (unknown).
+fn expect(r Req, seen Map[str, int]) int
+    key := r.roots.join("|")
+    if n := seen.get(key)
+        return n
+    if r.roots.len() < 3
+        return 0
+    v := fs.volume(r.roots[0]) else return 0
+    v.total - v.free
+
 fn scanner(inbox app.Inbox, reqs Channel[Req], done Channel[mock.Model])
+    mut seen := Map[str, int]()
     while true
         r := reqs.recv() else break
         n := r.roots.len()
         mut parts := List[scan.Scan]()
-        mut files := 0
         mut failed := ""
+        expected := expect(r, seen)
+        base := fs.scan_count()
         for i in 0..n
             root := r.roots[i]
-            pct := (i.to_float() / n.to_float()).max(0.02)
-            inbox.post(app.external("scan", "{pct}|{files}|{root}"))
+            stop := Atomic(0)
+            t := spawn ticker(inbox, stop, base, expected, i, n, root)
+            mut why := ""
             sc := scan.scan(root) else err
-                failed = "{root}: {err}"
+                why = "{err}"
+                scan.Scan(root: root, files: [], dirs: {}, total: 0, errors: [])
+            stop.store(1)
+            t.wait() else err
+                log.warn("progress task: {err}")
+            if why != ""
+                failed = "{root}: {why}"
                 continue
-            files += sc.files.len()
             parts.push(sc)
         if parts.is_empty()
             inbox.post(app.external("scan_failed", failed))
             continue
         merged := bridge.merge(parts)
+        seen[r.roots.join("|")] = fs.scan_count().bytes - base.bytes
         floor := (merged.total / 3000).max(1).min(67108864)
         mut tree := bridge.tree(merged, r.label, home(), time.now_ms(), floor)
         v := fs.volume(r.roots[0]) else err
@@ -599,10 +635,11 @@ pub fn run(root str)
 
 @test fn scan_events_drive_progress()
     mut h := fresh()
-    ev := app.external("scan", "0.25|1200|/Users/kaleb")
+    ev := app.external("scan", "0.25|1200|3145728|/Users/kaleb")
     h.update(ev)
     assert(h.s.pct < 0.3)
-    assert(h.s.scan_note.contains("1200 files"))
+    assert(h.s.scan_note.contains("1200 items"))
+    assert(h.s.scan_note.contains("3 MB"))
 
 @test fn overview_has_regions()
     h := fresh()
