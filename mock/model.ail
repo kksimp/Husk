@@ -482,7 +482,10 @@ pub fn rows(m Model, cur int, filter str, eff List[int]) List[int]
         pe := m.entries[e.parent]
         if own_filter(filter)
             # A folder that matches a search hides the matches inside it.
-            if hit(e, filter) and not (filter.starts_with("find:") and e.parent > 0 and hit(pe, filter))
+            if hit(
+                e,
+                filter,
+            ) and not (filter.starts_with("find:") and e.parent > 0 and hit(pe, filter))
                 out.push(id)
             continue
         found := if filter == "safe" then e.safety == "safe"

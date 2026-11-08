@@ -23,13 +23,128 @@ pub KINDS := [
     ("other", "Other"),
 ]
 
-VIDEO := ["mp4", "mov", "m4v", "mkv", "avi", "wmv", "webm", "mpg", "mpeg", "mts", "m2ts", "braw", "r3d", "prproj", "fcpbundle"]
-AUDIO := ["mp3", "m4a", "aac", "wav", "aif", "aiff", "flac", "alac", "ogg", "opus", "caf", "logicx", "band"]
-IMAGES := ["jpg", "jpeg", "png", "heic", "heif", "gif", "tif", "tiff", "raw", "cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "psd", "psb", "webp", "bmp", "svg", "exr"]
-ARCHIVES := ["zip", "tar", "gz", "tgz", "bz2", "xz", "zst", "7z", "rar", "dmg", "iso", "img", "pkg", "xip", "ipsw", "sparseimage", "cpgz", "lz4"]
+VIDEO := [
+    "mp4",
+    "mov",
+    "m4v",
+    "mkv",
+    "avi",
+    "wmv",
+    "webm",
+    "mpg",
+    "mpeg",
+    "mts",
+    "m2ts",
+    "braw",
+    "r3d",
+    "prproj",
+    "fcpbundle",
+]
+
+AUDIO := [
+    "mp3",
+    "m4a",
+    "aac",
+    "wav",
+    "aif",
+    "aiff",
+    "flac",
+    "alac",
+    "ogg",
+    "opus",
+    "caf",
+    "logicx",
+    "band",
+]
+
+IMAGES := [
+    "jpg",
+    "jpeg",
+    "png",
+    "heic",
+    "heif",
+    "gif",
+    "tif",
+    "tiff",
+    "raw",
+    "cr2",
+    "cr3",
+    "nef",
+    "arw",
+    "dng",
+    "raf",
+    "orf",
+    "psd",
+    "psb",
+    "webp",
+    "bmp",
+    "svg",
+    "exr",
+]
+
+ARCHIVES := [
+    "zip",
+    "tar",
+    "gz",
+    "tgz",
+    "bz2",
+    "xz",
+    "zst",
+    "7z",
+    "rar",
+    "dmg",
+    "iso",
+    "img",
+    "pkg",
+    "xip",
+    "ipsw",
+    "sparseimage",
+    "cpgz",
+    "lz4",
+]
+
 VM := ["vmdk", "vdi", "qcow2", "vhd", "vhdx", "hdd", "utm", "pvm", "vmwarevm"]
-DOCS := ["pdf", "doc", "docx", "pages", "key", "numbers", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf", "epub", "csv", "odt"]
-CODE := ["o", "a", "so", "dylib", "rlib", "rmeta", "class", "jar", "pyc", "obj", "pch", "pcm", "dSYM", "wasm", "node", "dex", "apk", "aab", "ipa"]
+
+DOCS := [
+    "pdf",
+    "doc",
+    "docx",
+    "pages",
+    "key",
+    "numbers",
+    "xls",
+    "xlsx",
+    "ppt",
+    "pptx",
+    "txt",
+    "md",
+    "rtf",
+    "epub",
+    "csv",
+    "odt",
+]
+
+CODE := [
+    "o",
+    "a",
+    "so",
+    "dylib",
+    "rlib",
+    "rmeta",
+    "class",
+    "jar",
+    "pyc",
+    "obj",
+    "pch",
+    "pcm",
+    "dSYM",
+    "wasm",
+    "node",
+    "dex",
+    "apk",
+    "aab",
+    "ipa",
+]
 
 ## The kind of the file at `p`. A file inside an app bundle or a VM bundle
 ## counts as the bundle's kind, whatever its own name.
@@ -107,7 +222,12 @@ fn file(p str, n int, ino int, links int) model.Entry
     )
 
 @test fn totals_count_links_once()
-    t := totals([file("/a.mp4", 10, 1, 1), file("/b.mp4", 5, 2, 2), file("/c.mp4", 5, 2, 2), file("/d.zip", 3, 3, 1)])
+    t := totals([
+        file("/a.mp4", 10, 1, 1),
+        file("/b.mp4", 5, 2, 2),
+        file("/c.mp4", 5, 2, 2),
+        file("/d.zip", 3, 3, 1),
+    ])
     assert_eq(t.len(), 2)
     assert_eq(t[0].id, "video")
     assert_eq(t[0].bytes, 15)

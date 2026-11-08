@@ -323,10 +323,11 @@ fn head(name str) NavItem
 
 ## What the sidebar lists: the overview, categories, finders and file kinds that have something.
 pub fn nav_items(s State) List[NavItem]
-    mut out := [
-        nav("", "Overview", s.eff[0]),
-        nav("safe", "Safe to delete", mock.filter_total(s.m, "safe", s.eff)),
-    ]
+    mut out := [nav("", "Overview", s.eff[0]), nav(
+        "safe",
+        "Safe to delete",
+        mock.filter_total(s.m, "safe", s.eff),
+    )]
     mut cats := List[NavItem]()
     for c in mock.CATS
         total := mock.filter_total(s.m, c.0, s.eff)
@@ -946,8 +947,22 @@ fn tooltip(s State, mut ops List[app.Op])
     look.round(mut ops, x - 1.0, y - 1.0, tw + 2.0, th + 2.0, 9.0, look.LINE, look.BG)
     look.round(mut ops, x, y, tw, th, 8.0, look.mix(look.PANEL, 0xffffff, 0.06), look.LINE)
     ops.push(look.text(x + 12.0, y + 9.0, look.fit(e.name, tw - 24.0, 12.0), look.TEXT, 12.0, true))
-    ops.push(look.text(x + 12.0, y + 27.0, look.fit(line, tw - 24.0, 11.0), look.safety_color(e.safety), 11.0, false))
-    ops.push(look.text(x + 12.0, y + 44.0, look.fit(e.reason, tw - 24.0, 11.0), look.DIM, 11.0, false))
+    ops.push(look.text(
+        x + 12.0,
+        y + 27.0,
+        look.fit(line, tw - 24.0, 11.0),
+        look.safety_color(e.safety),
+        11.0,
+        false,
+    ))
+    ops.push(look.text(
+        x + 12.0,
+        y + 44.0,
+        look.fit(e.reason, tw - 24.0, 11.0),
+        look.DIM,
+        11.0,
+        false,
+    ))
 
 ## The whole frame for a window of `s.w` by `s.h`.
 ## The first screen: pick what to scan.
