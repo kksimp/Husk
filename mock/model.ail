@@ -485,10 +485,10 @@ pub fn rows(m Model, cur int, filter str, eff List[int]) List[int]
             if hit(e, filter) and not (filter.starts_with("find:") and e.parent > 0 and hit(pe, filter))
                 out.push(id)
             continue
-        hit := if filter == "safe" then e.safety == "safe"
+        found := if filter == "safe" then e.safety == "safe"
             and pe.safety != "safe" else e.cat == filter
             and pe.cat != filter
-        if hit
+        if found
             out.push(id)
     out
 

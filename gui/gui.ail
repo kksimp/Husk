@@ -470,7 +470,11 @@ fn Husk.key(mut self, name str)
         return
     at := ids.index_of(s.sel) else -1
     if k == "down" or k == "up"
-        n := if at < 0 then 0 elif k == "down" then (at + 1).min(ids.len() - 1) else (at - 1).max(0)
+        mut n := (at - 1).max(0)
+        if at < 0
+            n = 0
+        elif k == "down"
+            n = (at + 1).min(ids.len() - 1)
         s.sel = ids[n]
         # Keep the selected row in view.
         ry := n.to_float() * view.ROW_H
