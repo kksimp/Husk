@@ -69,7 +69,316 @@ fn ext_rule(
 ) Rule
     rule(id, "ext", exts, "", age, under, false, rating, confidence, reason, false)
 
-pub fn builtin() List[Rule]
+## kind "abs": a directory at this absolute path (expand: each direct child
+## instead). Unlike the home-relative kinds it applies under /Library and the
+## other system folders `is_protected` keeps rated KEEP, because macOS puts
+## downloaded wallpapers, simulator runtimes and sound libraries there.
+fn abs_rule(id str, pattern str, expand bool, rating model.Rating, confidence int, reason str) Rule
+    rule(id, "abs", pattern, "", 0, "", expand, rating, confidence, reason, true)
+
+## Rules for things only a Mac has: Xcode and simulators, wallpapers, installers.
+fn macos_rules() List[Rule]
+    safe := model.Rating.Safe
+    prob := model.Rating.Probably
+    [
+        dir_rule(
+            "sim.device",
+            "Library/Developer/CoreSimulator/Devices",
+            true,
+            prob,
+            65,
+            "one iOS simulator: its apps and test data; delete it with xcrun simctl delete if you no longer test on it",
+        ),
+        abs_rule(
+            "sim.runtime.vol",
+            "/Library/Developer/CoreSimulator/Volumes",
+            true,
+            prob,
+            80,
+            "an iOS, watchOS, tvOS or visionOS simulator runtime; Xcode > Settings > Platforms downloads it again",
+        ),
+        abs_rule(
+            "sim.runtime.img",
+            "/Library/Developer/CoreSimulator/Images",
+            true,
+            prob,
+            80,
+            "a simulator runtime disk image; Xcode downloads it again",
+        ),
+        abs_rule(
+            "sim.runtime.old",
+            "/Library/Developer/CoreSimulator/Profiles/Runtimes",
+            true,
+            prob,
+            80,
+            "an installed simulator runtime; Xcode downloads it again",
+        ),
+        abs_rule(
+            "sim.runtime.cryptex",
+            "/Library/Developer/CoreSimulator/Cryptex",
+            true,
+            prob,
+            75,
+            "simulator runtime support files",
+        ),
+        dir_rule(
+            "xcode.devsupport.each",
+            "Library/Developer/Xcode/iOS DeviceSupport",
+            true,
+            prob,
+            85,
+            "debug symbols for one iOS version; copied again when a device of that version connects",
+        ),
+        dir_rule(
+            "xcode.devsupport.watch",
+            "Library/Developer/Xcode/watchOS DeviceSupport",
+            false,
+            prob,
+            85,
+            "debug symbols for Apple Watch; copied again when a watch connects",
+        ),
+        dir_rule(
+            "xcode.devsupport.tv",
+            "Library/Developer/Xcode/tvOS DeviceSupport",
+            false,
+            prob,
+            85,
+            "debug symbols for Apple TV; copied again when one connects",
+        ),
+        dir_rule(
+            "xcode.devsupport.vision",
+            "Library/Developer/Xcode/visionOS DeviceSupport",
+            false,
+            prob,
+            85,
+            "debug symbols for Apple Vision Pro; copied again when one connects",
+        ),
+        dir_rule(
+            "xcode.products",
+            "Library/Developer/Xcode/Products",
+            false,
+            prob,
+            70,
+            "built products Xcode keeps for archives; rebuilt on the next archive",
+        ),
+        dir_rule(
+            "xcode.docs",
+            "Library/Developer/Xcode/DocumentationCache",
+            false,
+            safe,
+            90,
+            "Xcode's documentation cache; rebuilt when you open the docs",
+        ),
+        dir_rule(
+            "xcode.previews",
+            "Library/Developer/Xcode/UserData/Previews",
+            false,
+            safe,
+            90,
+            "SwiftUI preview data; rebuilt when a preview runs",
+        ),
+        dir_rule(
+            "xcode.cache",
+            "Library/Caches/com.apple.dt.Xcode",
+            false,
+            safe,
+            90,
+            "Xcode's cache; rebuilt on demand",
+        ),
+        dir_rule(
+            "xcpg",
+            "Library/Developer/XCPGDevices",
+            false,
+            safe,
+            85,
+            "Xcode Playground simulator devices; recreated when needed",
+        ),
+        abs_rule(
+            "wallpaper.idle",
+            "/Library/Application Support/com.apple.idleassetsd",
+            false,
+            prob,
+            80,
+            "downloaded Aerial screensaver and wallpaper videos; macOS downloads them again if you pick them",
+        ),
+        dir_rule(
+            "wallpaper.user",
+            "Library/Application Support/com.apple.wallpaper/aerials",
+            false,
+            prob,
+            80,
+            "downloaded Aerial wallpaper videos; macOS downloads them again if you pick them",
+        ),
+        abs_rule(
+            "wallpaper.desktop",
+            "/Library/Desktop Pictures",
+            false,
+            prob,
+            60,
+            "extra desktop pictures installed with macOS; the one you use is copied elsewhere",
+        ),
+        abs_rule(
+            "macos.updates",
+            "/Library/Updates",
+            false,
+            prob,
+            85,
+            "downloaded macOS updates; macOS fetches them again",
+        ),
+        abs_rule(
+            "macos.installdata",
+            "/macOS Install Data",
+            false,
+            prob,
+            85,
+            "left over from a macOS upgrade; safe once the upgrade finished",
+        ),
+        abs_rule(
+            "garageband",
+            "/Library/Application Support/GarageBand",
+            false,
+            prob,
+            60,
+            "GarageBand sound library; download it again from inside GarageBand",
+        ),
+        abs_rule(
+            "logic",
+            "/Library/Application Support/Logic",
+            false,
+            prob,
+            60,
+            "Logic Pro sound library; download it again from inside Logic",
+        ),
+        abs_rule(
+            "loops",
+            "/Library/Audio/Apple Loops",
+            false,
+            prob,
+            60,
+            "Apple Loops; GarageBand and Logic download them again",
+        ),
+        dir_rule(
+            "mail.downloads",
+            "Library/Containers/com.apple.mail/Data/Library/Mail Downloads",
+            false,
+            prob,
+            70,
+            "copies of mail attachments you opened; the originals stay in Mail",
+        ),
+        glob_rule(
+            "macapk.code",
+            "Library/Application Support/macapk/*/.macapk/code",
+            true,
+            prob,
+            60,
+            "extracted code of an Android app run by macapk; macapk most likely extracts it again from the APK, but check that the APK is still around",
+        ),
+        suffix_rule(
+            "android.avd.dir",
+            ".avd",
+            prob,
+            70,
+            "an Android emulator device; recreate it in Android Studio's Device Manager",
+        ),
+        name_rule(
+            "android.images.any",
+            "system-images",
+            "",
+            prob,
+            75,
+            "Android emulator system images; sdkmanager downloads them again",
+        ),
+        dir_rule(
+            "android.avd",
+            ".android/avd",
+            true,
+            prob,
+            70,
+            "one Android emulator device: its disk image and apps; recreate it in Android Studio's Device Manager",
+        ),
+        dir_rule(
+            "android.cache",
+            ".android/cache",
+            false,
+            safe,
+            90,
+            "Android tools' download cache",
+        ),
+        dir_rule(
+            "android.images",
+            "Library/Android/sdk/system-images",
+            true,
+            prob,
+            80,
+            "an Android emulator system image; sdkmanager downloads it again",
+        ),
+        dir_rule(
+            "android.platforms",
+            "Library/Android/sdk/platforms",
+            true,
+            prob,
+            70,
+            "an Android SDK platform; downloaded again when a project needs it",
+        ),
+        dir_rule(
+            "android.buildtools",
+            "Library/Android/sdk/build-tools",
+            true,
+            prob,
+            75,
+            "Android build tools; Gradle downloads the version a project asks for",
+        ),
+        dir_rule(
+            "android.ndk",
+            "Library/Android/sdk/ndk",
+            true,
+            prob,
+            70,
+            "an Android NDK version; downloaded again when a project needs it",
+        ),
+        dir_rule(
+            "android.sources",
+            "Library/Android/sdk/sources",
+            false,
+            safe,
+            85,
+            "Android framework sources for the debugger; sdkmanager downloads them again",
+        ),
+        dir_rule(
+            "android.intermediates",
+            "Library/Android/sdk/.downloadIntermediates",
+            false,
+            safe,
+            95,
+            "leftover SDK download pieces",
+        ),
+        dir_rule(
+            "vscode.cache",
+            "Library/Application Support/Code/CachedData",
+            false,
+            safe,
+            90,
+            "VS Code's compiled-code cache; rebuilt on launch",
+        ),
+        dir_rule(
+            "vscode.vsix",
+            "Library/Application Support/Code/CachedExtensionVSIXs",
+            false,
+            safe,
+            90,
+            "downloaded extension packages; fetched again on update",
+        ),
+    ]
+
+## kind "glob": a home-relative path where "*" stands for any one folder name
+## (expand: each direct child). kind "suffix": a folder whose name ends with the pattern.
+fn glob_rule(id str, pattern str, expand bool, rating model.Rating, confidence int, reason str) Rule
+    rule(id, "glob", pattern, "", 0, "", expand, rating, confidence, reason, true)
+
+fn suffix_rule(id str, suffix str, rating model.Rating, confidence int, reason str) Rule
+    rule(id, "suffix", suffix, "", 0, "", false, rating, confidence, reason, true)
+
+fn base_rules() List[Rule]
     safe := model.Rating.Safe
     prob := model.Rating.Probably
     keep := model.Rating.Keep
@@ -264,6 +573,11 @@ pub fn builtin() List[Rule]
         ),
     ]
 
+pub fn builtin() List[Rule]
+    mut all := base_rules()
+    all.extend(macos_rules())
+    all
+
 ## Directories Husk never recommends from (rating KEEP) unless the caller passes
 ## allow_protected. Home-relative.
 fn protected_home() List[str]
@@ -337,6 +651,19 @@ fn fits(r Rule, p str, rel str, is_dir bool, mtime_ms int, now_ms int, markers S
             if not is_dir or path.base(p) != r.pattern
                 return false
             r.needs == "" or markers.contains("{path.dir(p)}/{r.needs}")
+        "glob" =>
+            if not is_dir
+                return false
+            matches_glob(if r.expand then path.dir(rel) else rel, r.pattern)
+        "suffix" =>
+            is_dir and path.base(p).ends_with(r.pattern)
+        "abs" =>
+            if not is_dir
+                return false
+            if r.expand
+                path.dir(p) == r.pattern
+            else
+                p == r.pattern
         "ext" =>
             if is_dir
                 return false
@@ -345,6 +672,41 @@ fn fits(r Rule, p str, rel str, is_dir bool, mtime_ms int, now_ms int, markers S
             age := (now_ms - mtime_ms) / DAY_MS
             age >= r.min_age_days and r.pattern.split("|").contains(path.ext(p).to_lower())
         _ => false
+
+## Does `rel` match `pattern`, folder by folder, where a `*` folder matches any one name?
+fn matches_glob(rel str, pattern str) bool
+    a := rel.split("/")
+    b := pattern.split("/")
+    if a.len() != b.len()
+        return false
+    for i in 0..a.len()
+        if b[i] != "*" and a[i] != b[i]
+            return false
+    true
+
+## Does an "abs" rule or an Android SDK rule name this path? Those apply even where
+## `is_protected` does: SDKs and emulator images are re-downloadable wherever they sit.
+fn abs_fits(
+    rules List[Rule],
+    p str,
+    rel str,
+    is_dir bool,
+    mtime_ms int,
+    now_ms int,
+    markers Set[str],
+) bool
+    for r in rules
+        if (r.kind == "abs" or r.id.starts_with("android.")) and fits(
+            r,
+            p,
+            rel,
+            is_dir,
+            mtime_ms,
+            now_ms,
+            markers,
+        )
+            return true
+    false
 
 fn specificity(r Rule) int
     r.pattern.len()
@@ -360,14 +722,22 @@ pub fn rate(
     rules List[Rule],
     allow_protected bool,
 ) model.Verdict
-    if not allow_protected and is_protected(p, home)
+    rel := relative(p, home)
+    if not allow_protected and is_protected(p, home) and not abs_fits(
+        rules,
+        p,
+        rel,
+        is_dir,
+        mtime_ms,
+        now_ms,
+        markers,
+    )
         return model.Verdict.keep(
             "protected",
             99,
             "your documents, system or account data; pass allow_protected to let rules apply here",
             true,
         )
-    rel := relative(p, home)
     mut best := -1
     for i in 0..rules.len()
         if fits(rules[i], p, rel, is_dir, mtime_ms, now_ms, markers)
@@ -434,3 +804,42 @@ fn rules_protected_system() bool
     assert_eq(rated("/Users/u/Downloads/x.dmg", false, 45, []).rule, "installer")
     assert_eq(rated("/Users/u/Downloads/x.dmg", false, 3, []).rule, "none")
     assert_eq(rated("/Users/u/Desktop/x.dmg", false, 45, []).rule, "protected")
+
+@test fn simulator_runtimes_and_wallpapers_are_found_under_library()
+    v := rated("/Library/Developer/CoreSimulator/Volumes/iOS_22A3351", true, 0, [])
+    assert_eq(v.rule, "sim.runtime.vol")
+    assert(not v.protected)
+    assert_eq(
+        rated("/Library/Application Support/com.apple.idleassetsd", true, 0, []).rule,
+        "wallpaper.idle",
+    )
+    assert_eq(rated("/Library/Application Support/Other", true, 0, []).rule, "protected")
+    assert_eq(
+        rated("/Users/u/Library/Developer/CoreSimulator/Devices/ABC", true, 0, []).rule,
+        "sim.device",
+    )
+    assert_eq(
+        rated("/Users/u/Library/Developer/Xcode/iOS DeviceSupport/17.0", true, 0, []).rule,
+        "xcode.devsupport.each",
+    )
+
+@test fn macapk_code_and_odd_android_sdks_are_found()
+    assert_eq(
+        rated(
+            "/Users/u/Library/Application Support/macapk/com.x/.macapk/code/com.x_1",
+            true,
+            0,
+            [],
+        ).rule,
+        "macapk.code",
+    )
+    assert_eq(
+        rated("/Users/u/Library/Application Support/macapk/com.x/data", true, 0, []).rule,
+        "none",
+    )
+    assert_eq(
+        rated("/Users/u/Documents/Projects/Macapk/sdk/system-images", true, 0, []).rule,
+        "android.images.any",
+    )
+    assert_eq(rated("/Users/u/code/sdk/system-images", true, 0, []).rule, "android.images.any")
+    assert_eq(rated("/Users/u/code/Pixel_8.avd", true, 0, []).rule, "android.avd.dir")

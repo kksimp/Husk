@@ -1,0 +1,95 @@
+## sysops: the two things a Mac needs a system tool for: giving an iCloud Drive
+## file back to iCloud (offload) and deleting what the user's own account can't.
+## Both return "" on success and the reason on failure. Nothing here chooses
+## what to delete; callers pass paths the user confirmed.
+
+## One `brctl evict`: "" on success, else the tool's own words.
+fn evict_one(p str) str
+    r := proc.run("/usr/bin/brctl", ["evict", p], "", 120000) else err
+        return "{err}"
+    if r.ok()
+        return ""
+    r.text().trim()
+
+## Offloads `p`: removes the copy on this Mac and keeps the file in iCloud
+## (`brctl evict`). It downloads again when opened. A folder that brctl refuses
+## is offloaded file by file; the reason names the first file that failed.
+## What `evict_file` returns for a file that is not stored in iCloud at all.
+pub NOT_CLOUD := "not in iCloud"
+
+## Offloads one file and checks that it worked: afterwards `ls -O` must show the
+## `dataless` flag. A file that is not in iCloud is left alone and reported as NOT_CLOUD.
+pub fn evict_file(p str) str
+    first := evict_one(p)
+    if first != ""
+        return "could not offload {path.base(p)}: {first}"
+    r := proc.run("/bin/ls", ["-lOd", p], "", 20000) else err
+        return ""
+    if r.text().contains("dataless")
+        return ""
+    NOT_CLOUD
+
+## Offloads `p`: removes the copy on this Mac and keeps the file in iCloud
+## (`brctl evict`). It downloads again when opened. A folder that brctl refuses
+## is offloaded file by file; the reason names the first file that failed.
+pub fn evict(p str) str
+    first := evict_one(p)
+    if first == ""
+        return ""
+    names := fs.walk(p) else return "could not offload {path.base(p)}: {first}"
+    mut failed := 0
+    mut why := first
+    for f in names
+        bad := evict_one(f)
+        if bad != ""
+            failed += 1
+            why = "{path.base(f)}: {bad}"
+    if failed == 0 and not names.is_empty()
+        return ""
+    "could not offload {failed} of {names.len()} files in {path.base(p)} ({why})"
+
+## Is `p` a path Husk will remove with administrator rights? An absolute path
+## at least three folders deep, without `..` or line breaks.
+pub fn safe_to_remove(p str) bool
+    if not p.starts_with("/") or p.contains("\n") or p.contains("\r")
+        return false
+    if p.contains("/../") or p.ends_with("/..")
+        return false
+    p.count("/") >= 3
+
+## Text for an AppleScript string literal.
+fn quote(s str) str
+    s.replace("\\", "\\\\").replace("\"", "\\\"")
+
+## The AppleScript that deletes `paths` with one administrator prompt.
+pub fn script(paths List[str]) str
+    mut parts := List[str]()
+    for p in paths
+        parts.push("quoted form of \"{quote(p)}\"")
+    "do shell script \"/bin/rm -rf \" & {parts.join(" & \" \" & ")} with administrator privileges"
+
+## Deletes `paths` permanently after macOS shows its own password prompt (one for all).
+pub fn remove_admin(paths List[str]) str
+    if paths.is_empty()
+        return ""
+    for p in paths
+        if not safe_to_remove(p)
+            return "refusing to delete {p} with administrator rights"
+    r := proc.run("/usr/bin/osascript", ["-e", script(paths)], "", 300000) else err
+        return "administrator delete failed: {err}"
+    if r.ok()
+        return ""
+    "administrator delete failed: {r.text().trim()}"
+
+@test fn the_script_quotes_every_path()
+    assert_eq(
+        script(["/a/b/c d", "/x/y/\"z"]),
+        "do shell script \"/bin/rm -rf \" & quoted form of \"/a/b/c d\" & \" \" & quoted form of \"/x/y/\\\"z\" with administrator privileges",
+    )
+
+@test fn shallow_or_odd_paths_are_refused()
+    assert(not safe_to_remove("/"))
+    assert(not safe_to_remove("/Library"))
+    assert(not safe_to_remove("/a/b/../c"))
+    assert(not safe_to_remove("relative/path/x"))
+    assert(safe_to_remove("/Library/Logs/DiagnosticReports"))

@@ -17,6 +17,8 @@ pub struct Entry
     pub age str
     ## The real path; empty for the mock tree.
     pub path str
+    ## Inside iCloud Drive: removing offloads by default.
+    pub icloud bool
 
 pub struct Model
     pub entries List[Entry]
@@ -31,6 +33,7 @@ pub CATS := [
     ("downloads", "Downloads"),
     ("apps", "Apps"),
     ("media", "Media"),
+    ("system", "macOS"),
     ("docs", "Documents"),
 ]
 
@@ -60,6 +63,7 @@ pub fn add(
         kids: [],
         age: age,
         path: "",
+        icloud: false,
     ))
     if parent >= 0
         m.entries[parent].kids.push(id)

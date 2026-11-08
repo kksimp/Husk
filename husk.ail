@@ -325,7 +325,7 @@ fn main()
         cmd_serve()
         return
     if cmd == "gui"
-        gui.run(root_of(o))
+        gui.run(if o.words.len() > 1 then o.words[1] else "")
         return
     if cmd == "scan"
         if o.json

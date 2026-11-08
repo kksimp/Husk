@@ -32,6 +32,17 @@ fn cat_of(rule str) str
         "mypy",
     ].contains(rule)
         return "dev"
+    if rule.starts_with("wallpaper") or rule.starts_with("macos.") or [
+        "garageband",
+        "logic",
+        "loops",
+    ].contains(rule)
+        return "system"
+    if rule.starts_with("vscode")
+        or rule.starts_with("xcpg")
+        or rule.starts_with("android")
+        or rule.starts_with("macapk")
+        return "dev"
     if rule == "lib.logs"
         return "logs"
     if rule == "installer" or rule == "old.archive"
@@ -61,14 +72,15 @@ fn age_of(mtime_ms int, now_ms int) str
     "{days / 365} years ago"
 
 ## The entry list for `s`: parents come before children.
-pub fn tree(s scan.Scan, home str, now_ms int, min_bytes int) mock.Model
+pub fn tree(s scan.Scan, label str, home str, now_ms int, min_bytes int) mock.Model
     rs := rules.builtin()
     known := plan_markers(s)
     mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0)
+    top := mock.add(mut m, -1, label, 0, true, "keep", "Everything Husk scanned", "", "")
     mut at := Map[str, int]()
     mut order := List[str]()
     for d, b in s.dirs
-        if b >= min_bytes or d == s.root
+        if b >= min_bytes
             order.push(d)
     mut files := Map[str, model.Entry]()
     for e in s.files
@@ -81,17 +93,17 @@ pub fn tree(s scan.Scan, home str, now_ms int, min_bytes int) mock.Model
         size := if is_file then (files.get(p) else files_zero()).bytes() else (s.dirs.get(p) else 0)
         mtime := if is_file then (files.get(p) else files_zero()).mtime_ms else 0
         v := rules.rate(p, not is_file, mtime, home, now_ms, known, rs, false)
-        parent := at.get(path.dir(p)) else -1
+        parent := at.get(path.dir(p)) else top
         mut safety := safety_of(v.rating)
         mut why := v.reason
         mut cat := cat_of(v.rule)
-        if v.rule == "none" and parent >= 0
+        if v.rule == "none" and parent != top
             pe := m.entries[parent]
             if pe.safety != "keep"
                 safety = pe.safety
                 why = "inside {pe.name}: {pe.reason}"
                 cat = pe.cat
-        name := if parent < 0 then p else base(p)
+        name := if parent == top then p else base(p)
         id := mock.add(
             mut m,
             parent,
@@ -104,6 +116,7 @@ pub fn tree(s scan.Scan, home str, now_ms int, min_bytes int) mock.Model
             age_of(mtime, now_ms),
         )
         m.entries[id].path = p
+        m.entries[id].icloud = maybe_cloud(p, home)
         at[p] = id
     m
 
@@ -125,3 +138,25 @@ fn plan_markers(s scan.Scan) Set[str]
     for e in s.files
         known.add(e.path)
     known
+
+## One scan out of several: sizes add up, so roots that overlap are counted twice;
+## callers pass roots that do not nest.
+pub fn merge(parts List[scan.Scan]) scan.Scan
+    mut files := List[model.Entry]()
+    mut dirs := Map[str, int]()
+    mut errors := List[str]()
+    mut total := 0
+    for p in parts
+        files.extend(p.files)
+        for d, b in p.dirs
+            dirs[d] = (dirs.get(d) else 0) + b
+        errors.extend(p.errors)
+        total += p.total
+    scan.Scan(root: "", files: files, dirs: dirs, total: total, errors: errors)
+
+## Could `p` be in iCloud Drive? Drive itself, or Desktop and Documents, which iCloud can sync
+## from their usual place. Offloading checks, so a wrong guess just falls back to the Trash.
+fn maybe_cloud(p str, home str) bool
+    p.contains("/Library/Mobile Documents/")
+        or p.starts_with("{home}/Desktop/")
+        or p.starts_with("{home}/Documents/")
