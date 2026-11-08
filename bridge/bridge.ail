@@ -1,8 +1,10 @@
 ## bridge: turns a scan (scan/, rules/) into the tree the GUI draws (mock.Model).
 ## Only directories and files at least `min_bytes` big become entries, so a
 ## home folder with a million files stays a few thousand tiles; a folder's size
-## is still its full scanned total.
+## is still its full scanned total. The biggest files of each kind, the large
+## files and the old ones are kept even when smaller, so those views are not empty.
 
+use kinds
 use mock
 use model
 use rules
@@ -74,19 +76,32 @@ fn age_of(mtime_ms int, now_ms int) str
 ## The entry list for `s`: parents come before children.
 pub fn tree(s scan.Scan, label str, home str, now_ms int, min_bytes int) mock.Model
     rs := rules.builtin()
+    extra := extras(s, now_ms, min_bytes)
     known := plan_markers(s)
-    mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0)
-    top := mock.add(mut m, -1, label, 0, true, "keep", "Everything Husk scanned", "", "")
+    mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0, kinds: kinds.totals(s.files))
+    top := mock.add(mut m, -1, label, s.total, true, "keep", "Everything Husk scanned", "", "")
     mut at := Map[str, int]()
     mut order := List[str]()
+    mut listed := Set[str]()
     for d, b in s.dirs
         if b >= min_bytes
             order.push(d)
+            listed.add(d)
     mut files := Map[str, model.Entry]()
     for e in s.files
-        if e.bytes() >= min_bytes
+        if e.bytes() >= min_bytes or extra.contains(e.path)
             files[e.path] = e
             order.push(e.path)
+            listed.add(e.path)
+    # An extra file needs its folders, up to one already listed or a root.
+    for p in extra
+        mut d := path.dir(p)
+        while s.dirs.contains(d) and listed.add(d)
+            order.push(d)
+            up := path.dir(d)
+            if up == d
+                break
+            d = up
     # A parent path is a prefix of its children's, so it sorts first.
     for p in order.sorted()
         is_file := files.contains(p)
@@ -117,8 +132,42 @@ pub fn tree(s scan.Scan, label str, home str, now_ms int, min_bytes int) mock.Mo
         )
         m.entries[id].path = p
         m.entries[id].icloud = maybe_cloud(p, home)
+        if is_file
+            m.entries[id].days = if mtime > 0 then (now_ms - mtime) / 86400000 else -1
+            m.entries[id].kind = kinds.of(p)
         at[p] = id
     m
+
+## Most files of one kind kept below the size floor.
+PER_KIND := 60
+## Most large files and most old files kept below the size floor.
+PER_VIEW := 300
+
+## Files smaller than `min_bytes` that the Large files, Old files and kind views
+## still list: per kind the biggest `PER_KIND`, then up to `PER_VIEW` large and
+## `PER_VIEW` old ones, biggest first. Files under 1 MB are never extras.
+pub fn extras(s scan.Scan, now_ms int, min_bytes int) Set[str]
+    mut out := Set[str]()
+    mut small := List[model.Entry]()
+    for e in s.files
+        if e.bytes() < min_bytes and e.bytes() >= mock.MB
+            small.push(e)
+    mut per := Map[str, int]()
+    mut big := 0
+    mut old := 0
+    for e in small.sorted(by: |e| -e.bytes())
+        k := kinds.of(e.path)
+        n := per.get(k) else 0
+        if n < PER_KIND
+            per[k] = n + 1
+            out.add(e.path)
+        if e.size >= mock.BIG and big < PER_VIEW
+            big += 1
+            out.add(e.path)
+        if e.mtime_ms > 0 and (now_ms - e.mtime_ms) / 86400000 >= mock.OLD_DAYS and old < PER_VIEW
+            old += 1
+            out.add(e.path)
+    out
 
 fn files_zero() model.Entry
     model.Entry(
@@ -160,3 +209,37 @@ fn maybe_cloud(p str, home str) bool
     p.contains("/Library/Mobile Documents/")
         or p.starts_with("{home}/Desktop/")
         or p.starts_with("{home}/Documents/")
+
+fn file_at(p str, n int, mtime int) model.Entry
+    mut e := files_zero()
+    e.path = p
+    e.size = n
+    e.alloc = n
+    e.mtime_ms = mtime
+    e
+
+@test fn small_files_of_a_kind_still_get_listed()
+    day := 86400000
+    now := 1000 * day
+    files := [
+        file_at("/r/a/huge.bin", 900 * mock.MB, now),
+        file_at("/r/b/clip.mov", 2 * mock.MB, now),
+        file_at("/r/b/tiny.txt", 10, now),
+        file_at("/r/c/d/old.pdf", 3 * mock.MB, 10 * day),
+    ]
+    mut dirs := Map[str, int]()
+    for d in ["/r", "/r/a", "/r/b", "/r/c", "/r/c/d"]
+        dirs[d] = 0
+    s := scan.Scan(root: "/r", files: files, dirs: dirs, total: 905 * mock.MB, errors: [])
+    x := extras(s, now, 100 * mock.MB)
+    assert(x.contains("/r/b/clip.mov"))
+    assert(x.contains("/r/c/d/old.pdf"))
+    assert(not x.contains("/r/b/tiny.txt"))
+    m := tree(s, "/r", "/home", now, 100 * mock.MB)
+    mut names := Set[str]()
+    for e in m.entries
+        names.add(e.name)
+    assert(names.contains("old.pdf"))
+    assert(names.contains("d"))
+    assert_eq(m.entries[0].size, 905 * mock.MB)
+    assert(m.kinds.len() >= 3)

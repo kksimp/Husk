@@ -1,0 +1,115 @@
+## kinds: what sort of file a path is (video, photos, archives…), from its name,
+## and the totals per kind over a whole scan. Names only: no file is opened.
+
+use model
+
+## A file kind: `id` is the filter key, `name` the sidebar title.
+pub struct Kind
+    pub id str
+    pub name str
+    pub bytes int
+    pub count int
+
+## The kinds in sidebar order; `other` is everything else.
+pub KINDS := [
+    ("video", "Movies"),
+    ("audio", "Music & audio"),
+    ("images", "Pictures"),
+    ("archives", "Archives & disk images"),
+    ("apps", "Apps"),
+    ("vm", "Virtual machines"),
+    ("docs", "Documents"),
+    ("code", "Code & build output"),
+    ("other", "Other"),
+]
+
+VIDEO := ["mp4", "mov", "m4v", "mkv", "avi", "wmv", "webm", "mpg", "mpeg", "mts", "m2ts", "braw", "r3d", "prproj", "fcpbundle"]
+AUDIO := ["mp3", "m4a", "aac", "wav", "aif", "aiff", "flac", "alac", "ogg", "opus", "caf", "logicx", "band"]
+IMAGES := ["jpg", "jpeg", "png", "heic", "heif", "gif", "tif", "tiff", "raw", "cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "psd", "psb", "webp", "bmp", "svg", "exr"]
+ARCHIVES := ["zip", "tar", "gz", "tgz", "bz2", "xz", "zst", "7z", "rar", "dmg", "iso", "img", "pkg", "xip", "ipsw", "sparseimage", "cpgz", "lz4"]
+VM := ["vmdk", "vdi", "qcow2", "vhd", "vhdx", "hdd", "utm", "pvm", "vmwarevm"]
+DOCS := ["pdf", "doc", "docx", "pages", "key", "numbers", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf", "epub", "csv", "odt"]
+CODE := ["o", "a", "so", "dylib", "rlib", "rmeta", "class", "jar", "pyc", "obj", "pch", "pcm", "dSYM", "wasm", "node", "dex", "apk", "aab", "ipa"]
+
+## The kind of the file at `p`. A file inside an app bundle or a VM bundle
+## counts as the bundle's kind, whatever its own name.
+pub fn of(p str) str
+    if p.contains(".app/")
+        return "apps"
+    for b in [".vmwarevm/", ".pvm/", ".utm/", ".sparsebundle/"]
+        if p.contains(b)
+            return if b == ".sparsebundle/" then "archives" else "vm"
+    e := path.ext(p).to_lower()
+    if e == ""
+        return "other"
+    if VIDEO.contains(e)
+        return "video"
+    if AUDIO.contains(e)
+        return "audio"
+    if IMAGES.contains(e)
+        return "images"
+    if ARCHIVES.contains(e)
+        return "archives"
+    if VM.contains(e)
+        return "vm"
+    if DOCS.contains(e)
+        return "docs"
+    if CODE.contains(e) or CODE.contains(path.ext(p))
+        return "code"
+    "other"
+
+## The sidebar title of kind `id`.
+pub fn name(id str) str
+    for k in KINDS
+        if k.0 == id
+            return k.1
+    id
+
+## Bytes and file counts per kind over `files`, in `KINDS` order, empty kinds left out.
+## A hard link counts once, as in the scan's totals.
+pub fn totals(files List[model.Entry]) List[Kind]
+    mut bytes := Map[str, int]()
+    mut count := Map[str, int]()
+    mut seen := Set[str]()
+    for e in files
+        if e.nlink > 1 and not seen.add("{e.dev}:{e.ino}")
+            continue
+        k := of(e.path)
+        bytes[k] = (bytes.get(k) else 0) + e.bytes()
+        count[k] = (count.get(k) else 0) + 1
+    mut out := List[Kind]()
+    for k in KINDS
+        n := bytes.get(k.0) else 0
+        if n > 0
+            out.push(Kind(id: k.0, name: k.1, bytes: n, count: count.get(k.0) else 0))
+    out
+
+@test fn kinds_by_name()
+    assert_eq(of("/u/Movies/trip.MOV"), "video")
+    assert_eq(of("/u/a.tar.gz"), "archives")
+    assert_eq(of("/Applications/Xcode.app/Contents/x.dylib"), "apps")
+    assert_eq(of("/u/Parallels/Win.pvm/disk.hds"), "vm")
+    assert_eq(of("/u/.bashrc"), "other")
+    assert_eq(of("/u/b/libfoo.dylib"), "code")
+    assert_eq(name("images"), "Pictures")
+
+fn file(p str, n int, ino int, links int) model.Entry
+    model.Entry(
+        path: p,
+        size: n,
+        alloc: n,
+        mtime_ms: 0,
+        is_dir: false,
+        dev: 1,
+        ino: ino,
+        nlink: links,
+        is_symlink: false,
+    )
+
+@test fn totals_count_links_once()
+    t := totals([file("/a.mp4", 10, 1, 1), file("/b.mp4", 5, 2, 2), file("/c.mp4", 5, 2, 2), file("/d.zip", 3, 3, 1)])
+    assert_eq(t.len(), 2)
+    assert_eq(t[0].id, "video")
+    assert_eq(t[0].bytes, 15)
+    assert_eq(t[0].count, 2)
+    assert_eq(t[1].bytes, 3)

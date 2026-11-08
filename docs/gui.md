@@ -15,7 +15,7 @@ One `std.app` canvas (`husk.ail gui`, `view/view.ail`), Safari-style dark like G
 ## Needed in ail (not worked around)
 
 1. `fs.trash` (the sheet's Move to Trash only hides entries now), `fs.scan` progress events, `fs.volume`.
-2. std.app: a canvas `move` (hover) event for treemap tooltips; double-click; right-click context menu; alpha in `Fill` for a dimmed sheet backdrop; host-side text measuring is there (std.app.13) and should replace `look.width`.
+2. Landed and used: hover `move`/`leave` (std.app.16), `clicks` (std.app.17), popup menus (std.app.18), `Shade` (std.app.19), clipboard (std.app.26). Still to adopt: host text measuring (std.app.13) in place of `look.width`.
 
 Not built or run yet: builds happen on Kaleb's machines.
 
@@ -26,3 +26,12 @@ The window opens on a welcome page (nothing scanned yet): Smart scan, Home, Xcod
 macOS cleanup rules (rules/rules.ail `macos_rules`): simulator devices and runtimes (`/Library/Developer/CoreSimulator`), Xcode device support, previews, docs cache, Aerial wallpapers and `/Library/Desktop Pictures`, macOS update leftovers, GarageBand and Logic libraries, Mail Downloads, VS Code caches. Kind `abs` rules apply under `/Library` even though that is protected.
 
 Wanted from ail: a native folder picker for std.app (NSOpenPanel), and scan progress from `fs.scan`.
+
+## Finding things (2026-11-08)
+
+- **Sidebar** scrolls (wheel over it) and adds FIND (Large files over 100 MB, Old files not changed for a year) and FILE TYPES (Movies, Music, Pictures, Archives and disk images, Apps, Virtual machines, Documents, Code and build output, Other). Kind totals cover every scanned file (`kinds.totals`, hard links once); the lists show the biggest (`bridge.extras` keeps up to 60 per kind and 300 large and 300 old files below the size floor, with their folders).
+- **Search** field next to Scan: names containing the text, anywhere in the scan; a matching folder hides the matches inside it.
+- **Hover card** over a tile or row: name, size, safety, last change, kind, reason. It is anchored where the pointer entered, so moving inside a tile sends no new frame.
+- **Right-click menu:** Reveal in Finder, Open, Copy Path, Show in Enclosing Folder (in a filtered view), Look Inside, Tick / Untick. Double-click a file reveals it.
+- **Keys:** Up/Down select, Return looks inside or reveals, Space ticks, Escape cancels a sheet.
+- The sheet dims the window with `Shade`. The frame is drawn once per event and clicks and moves are hit-tested against it.

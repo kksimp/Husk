@@ -29,46 +29,46 @@ struct Husk
     last str
     ## A folder dialog is open (std.app.21).
     picking bool
+    ## The frame last drawn: clicks and pointer moves are looked up in it.
+    f view.Frame
+    ## The right-click menu while it is open (std.app.18) and the entry it is for.
+    menu app.Popup?
+    menu_for int
+    ## Lines for the host, such as the clipboard (std.app.21, std.app.26).
+    out List[str]
 
 impl app.App for Husk
     fn update(mut self, ev app.Event)
-        match ev.kind
-            "resize" if ev.id == "main" =>
-                s.w = ev.dx
-                s.h = ev.dy
-                s.top = s.top.min(view.max_scroll(s))
-            "scroll" =>
-                s.top = (s.top + ev.dy).max(0.0).min(view.max_scroll(s))
-            "click" if ev.id == "main" and ev.text == "left" => click(ev.x, ev.y)
-            "key" => key(ev.text)
-            "edit" if ev.id == "path" => s.path = ev.text
-            "submit" if ev.id == "path" => start(s.path)
-            "press" if ev.id == "go" => start(s.path)
-            "picked" =>
-                picking = false
-                if ev.text != ""
-                    s.path = ev.text
-                    start(ev.text)
-            "pick_error" =>
-                picking = false
-                s.notice = "{ev.text}. Type the folder in the field instead."
-            "external" if ev.id == "scan" => progress(ev.text)
-            "external" if ev.id == "scan_done" => finished()
-            "external" if ev.id == "scan_failed" => failed(ev.text)
-            _ => return
+        if ev.kind == "move" or ev.kind == "leave"
+            if not pointer(ev)
+                return
+        else
+            handle(ev)
+        f = view.draw(s)
 
     fn view(self) app.Node
-        f := view.draw(s)
         app.column([
             app.row([
                 app.field("path", s.path, "Folder to scan, such as ~/Library (~ is your home)"),
                 app.button("go", "Scan"),
+                app.field("find", s.find, "Search names"),
             ]),
             app.canvas("main", 0.0, 0.0, f.ops),
         ])
 
     fn title(self) str
         "Husk"
+
+    fn hover(self) bool
+        s.scanned
+
+    fn popup(self) app.Popup?
+        menu
+
+    fn lines(mut self) List[str]
+        sent := out
+        out = []
+        sent
 
     fn pick(self) app.Picker?
         if picking
@@ -84,6 +84,41 @@ impl app.App for Husk
         if s.scanned
             return ""
         "path"
+
+## One event other than a pointer move.
+fn Husk.handle(mut self, ev app.Event)
+    match ev.kind
+        "resize" if ev.id == "main" =>
+            s.w = ev.dx
+            s.h = ev.dy
+            s.top = s.top.min(view.max_scroll(s))
+            s.side_top = s.side_top.min(view.side_max(s))
+        "scroll" if s.mx < view.SIDE_W =>
+            s.side_top = (s.side_top + ev.dy).max(0.0).min(view.side_max(s))
+        "scroll" =>
+            s.top = (s.top + ev.dy).max(0.0).min(view.max_scroll(s))
+        "click" if ev.id == "main" and ev.text == "left" => click(ev.x, ev.y, ev.clicks)
+        "click" if ev.id == "main" and ev.text == "right" => context(ev.x, ev.y)
+        "popup" =>
+            menu = none
+            act(ev.text)
+        "key" => key(ev.text)
+        "edit" if ev.id == "path" => s.path = ev.text
+        "edit" if ev.id == "find" => search(ev.text)
+        "submit" if ev.id == "path" => start(s.path)
+        "press" if ev.id == "go" => start(s.path)
+        "picked" =>
+            picking = false
+            if ev.text != ""
+                s.path = ev.text
+                start(ev.text)
+        "pick_error" =>
+            picking = false
+            s.notice = "{ev.text}. Type the folder in the field instead."
+        "external" if ev.id == "scan" => progress(ev.text)
+        "external" if ev.id == "scan_done" => finished()
+        "external" if ev.id == "scan_failed" => failed(ev.text)
+        _ => return
 
 ## A scan update from the scanner: `pct|files|path`.
 fn Husk.progress(mut self, text str)
@@ -189,12 +224,104 @@ fn Husk.go(mut self, id int)
     s.sel = -1
     s.top = 0.0
 
-fn Husk.click(mut self, x float, y float)
-    f := view.draw(s)
+## A pointer `move` or `leave`: true when the hovered tile or row changed, so the
+## tooltip must be drawn again. The tooltip stays where the pointer entered.
+fn Husk.pointer(mut self, ev app.Event) bool
+    mut id := -1
+    if ev.kind == "move"
+        s.mx = ev.x
+        if r := view.hit(f, ev.x, ev.y)
+            if r.kind == "tile" or r.kind == "row"
+                id = r.k
+    if id == s.hover
+        return false
+    s.hover = id
+    s.hx = ev.x
+    s.hy = ev.y
+    true
+
+## The search field changed: show the entries whose names contain the text.
+fn Husk.search(mut self, text str)
+    s.find = text
+    q := text.trim()
+    s.filter = if q == "" then "" else "find:{q}"
+    s.sel = -1
+    s.top = 0.0
+
+## A right-click on a tile or row selects it and opens its menu.
+fn Husk.context(mut self, x float, y float)
+    r := view.hit(f, x, y) else return
+    if r.kind != "tile" and r.kind != "row" and r.kind != "check"
+        return
+    s.sel = r.k
+    s.hover = -1
+    menu_for = r.k
+    menu = app.Popup(id: "item", x: x, y: y, items: menu_items(r.k))
+
+## The right-click menu for entry `id`.
+fn Husk.menu_items(self, id int) List[str]
+    e := s.m.entries[id]
+    mut items := [REVEAL, OPEN, COPY]
+    if s.filter != ""
+        items.push(SHOW)
+    if e.is_dir and not e.kids.is_empty()
+        items.push(INTO)
+    items.push(if s.marks.contains(id) then UNMARK else MARK)
+    items
+
+REVEAL := "Reveal in Finder"
+OPEN := "Open"
+COPY := "Copy Path"
+SHOW := "Show in Enclosing Folder"
+INTO := "Look Inside"
+MARK := "Tick for the Trash"
+UNMARK := "Untick"
+
+## A menu choice for the entry the menu was opened on; `""` is a dismissed menu.
+fn Husk.act(mut self, label str)
+    id := menu_for
+    if id < 0 or id >= s.m.entries.len()
+        return
+    e := s.m.entries[id]
+    if label == REVEAL
+        finder(["-R", e.path])
+    elif label == OPEN
+        finder([e.path])
+    elif label == COPY and e.path != ""
+        out.push(app.clipboard(e.path))
+        s.notice = "Copied {e.path}"
+    elif label == SHOW
+        s.filter = ""
+        s.find = ""
+        go(e.parent)
+        s.sel = id
+        row := s.shown().index_of(id) else 0
+        s.top = (row.to_float() * view.ROW_H - 60.0).max(0.0).min(view.max_scroll(s))
+    elif label == INTO
+        go(id)
+    elif label == MARK
+        s.marks.add(id)
+        s.undo = []
+    elif label == UNMARK
+        s.marks.remove(id)
+
+## Runs `open` with `args` (Finder opens or reveals the path). The mock tree has no paths.
+fn Husk.finder(mut self, args List[str])
+    if (args.last() else "") == ""
+        s.notice = "This is sample data; scan a folder to open real files."
+        return
+    r := proc.run("/usr/bin/open", args, "", 10000) else err
+        s.notice = "open failed: {err}"
+        return
+    if not r.ok()
+        s.notice = "open failed: {r.text().trim()}"
+
+fn Husk.click(mut self, x float, y float, clicks int)
     r := view.hit(f, x, y) else return
     match r.kind
         "nav" =>
             s.filter = r.arg
+            s.find = ""
             s.cur = 0
             s.sel = -1
             s.top = 0.0
@@ -202,8 +329,11 @@ fn Husk.click(mut self, x float, y float)
         "target" => start(r.arg)
         "rescan" => start(last)
         "tile" | "row" =>
-            if s.sel == r.k and s.m.entries[r.k].is_dir and not s.m.entries[r.k].kids.is_empty()
+            e := s.m.entries[r.k]
+            if s.sel == r.k and e.is_dir and not e.kids.is_empty()
                 go(r.k)
+            elif clicks >= 2 and not e.is_dir
+                finder(["-R", e.path])
             else
                 s.sel = r.k
         "check" =>
@@ -324,12 +454,40 @@ fn Husk.undo(mut self)
     s.undo = []
     s.eff = mock.sizes(s.m, s.gone)
 
+## Keys: Escape closes the sheet, Backspace goes up, the arrows move the selection,
+## Return looks inside the selected folder (or reveals a file), Space ticks it.
 fn Husk.key(mut self, name str)
     k := name.to_lower()
-    if k == "escape"
-        s.sheet = false
-    elif k == "backspace" and s.filter == "" and s.cur > 0
+    if s.sheet
+        if k == "escape"
+            cancel()
+        return
+    if k == "backspace" and s.filter == "" and s.cur > 0
         go(s.m.entries[s.cur].parent)
+        return
+    ids := s.shown()
+    if ids.is_empty()
+        return
+    at := ids.index_of(s.sel) else -1
+    if k == "down" or k == "up"
+        n := if at < 0 then 0 elif k == "down" then (at + 1).min(ids.len() - 1) else (at - 1).max(0)
+        s.sel = ids[n]
+        # Keep the selected row in view.
+        ry := n.to_float() * view.ROW_H
+        if ry < s.top
+            s.top = ry
+        elif ry + view.ROW_H > s.top + view.list_height(s)
+            s.top = (ry + view.ROW_H - view.list_height(s)).min(view.max_scroll(s))
+    elif k == "enter" and at >= 0
+        e := s.m.entries[s.sel]
+        if e.is_dir and not e.kids.is_empty()
+            go(s.sel)
+        else
+            finder(["-R", e.path])
+    elif k == " " and at >= 0
+        if not s.marks.add(s.sel)
+            s.marks.remove(s.sel)
+        s.undo = []
 
 fn fresh() Husk
     mut h := Husk(
@@ -338,14 +496,19 @@ fn fresh() Husk
         reqs: Channel[Req](1),
         last: "home",
         picking: false,
+        f: view.Frame(ops: [], regs: []),
+        menu: none,
+        menu_for: -1,
+        out: [],
     )
     h.s.scanned = true
     h.s.targets = targets()
+    h.f = view.draw(h.s)
     h
 
 ## A one-entry tree for before the first scan.
 fn placeholder() mock.Model
-    mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0)
+    mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0, kinds: [])
     mock.add(mut m, -1, "This Mac", 1, true, "keep", "", "", "")
     m
 
@@ -391,6 +554,10 @@ pub fn run(root str)
         reqs: reqs,
         last: "",
         picking: false,
+        f: view.Frame(ops: [], regs: []),
+        menu: none,
+        menu_for: -1,
+        out: [],
     )
     h.s.targets = targets()
     inbox := app.new_inbox()
@@ -398,6 +565,7 @@ pub fn run(root str)
     g.add(spawn scanner(inbox, reqs, done))
     if root != ""
         h.start(root)
+    h.f = view.draw(h.s)
     host := app.host_path() else err
         print("no window: {err.kind}: {err.message}")
         reqs.close()
@@ -466,3 +634,62 @@ pub fn run(root str)
     assert(h.s.admin.is_empty())
     assert(not h.s.sheet)
     assert(h.s.notice.contains("2 items"))
+
+@test fn search_finds_names_anywhere()
+    mut h := fresh()
+    h.update(app.edit("find", "cache"))
+    assert_eq(h.s.filter, "find:cache")
+    ids := h.s.shown()
+    assert(not ids.is_empty())
+    for id in ids
+        assert(h.s.m.entries[id].name.to_lower().contains("cache"))
+    h.update(app.edit("find", ""))
+    assert_eq(h.s.filter, "")
+
+@test fn right_click_opens_a_menu_and_ticks()
+    mut h := fresh()
+    tile := [r for r in h.f.regs if r.kind == "tile"][0]
+    mut ev := app.event("click")
+    ev.id = "main"
+    ev.text = "right"
+    ev.x = tile.x + 4.0
+    ev.y = tile.y + 4.0
+    h.update(ev)
+    menu := h.popup() else unreachable("no menu")
+    assert(menu.items.contains(MARK))
+    mut pick := app.event("popup")
+    pick.id = "item"
+    pick.text = MARK
+    h.update(pick)
+    assert(h.popup() == none)
+    assert(h.s.marks.contains(tile.k))
+
+@test fn copy_path_sends_a_clipboard_line()
+    mut h := fresh()
+    h.s.m.entries[1].path = "/Users/me/x"
+    h.menu_for = 1
+    h.act(COPY)
+    assert_eq(h.lines().len(), 1)
+    assert(h.lines().is_empty())
+
+@test fn hovering_a_tile_shows_its_card()
+    mut h := fresh()
+    tile := [r for r in h.f.regs if r.kind == "tile"][0]
+    mut ev := app.event("move")
+    ev.id = "main"
+    ev.x = tile.x + 4.0
+    ev.y = tile.y + 4.0
+    h.update(ev)
+    assert_eq(h.s.hover, tile.k)
+    h.update(app.event("leave"))
+    assert_eq(h.s.hover, -1)
+
+@test fn arrows_move_the_selection()
+    mut h := fresh()
+    h.update(app.key("down"))
+    first := h.s.sel
+    assert(first >= 0)
+    h.update(app.key("down"))
+    assert(h.s.sel != first)
+    h.update(app.key(" "))
+    assert(h.s.marks.contains(h.s.sel))

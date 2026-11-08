@@ -3,6 +3,7 @@
 ## regions, so what is drawn and what is hit cannot drift apart.
 
 use std.app
+use kinds
 use mock
 use treemap
 use look
@@ -43,6 +44,16 @@ pub struct State
     pub cloud_delete bool
     ## Entries that need administrator rights to remove; non-empty shows the admin sheet.
     pub admin List[int]
+    ## The tile or row under the pointer (-1: none) and where the pointer entered it.
+    pub hover int
+    pub hx float
+    pub hy float
+    ## The pointer's last x, so a scroll over the sidebar scrolls the sidebar.
+    pub mx float
+    ## How far the sidebar's list is scrolled.
+    pub side_top float
+    ## The search field's text.
+    pub find str
 
 ## A rectangle that reacts to a click. `kind` says what; `k` is an entry id or
 ## index, `arg` a filter or sort key.
@@ -90,6 +101,12 @@ pub fn State.new(m mock.Model) State
         path: "",
         cloud_delete: false,
         admin: [],
+        hover: -1,
+        hx: 0.0,
+        hy: 0.0,
+        mx: 0.0,
+        side_top: 0.0,
+        find: "",
     )
 
 ## The ids the list and treemap show, in the order the user sorted them.
@@ -155,6 +172,14 @@ fn State.title(self) str
         return m.entries[cur].name
     if filter == "safe"
         return "Safe to delete"
+    if filter == "big"
+        return "Large files (over {mock.fmt_size(mock.BIG)})"
+    if filter == "old"
+        return "Old files (not changed for a year)"
+    if k := filter.strip_prefix("kind:")
+        return kinds.name(k)
+    if q := filter.strip_prefix("find:")
+        return "Names containing “{q}”"
     for c in mock.CATS
         if c.0 == filter
             return c.1
@@ -283,53 +308,107 @@ fn sidebar_targets(s State, mut ops List[app.Op], mut regs List[Region])
         reg(mut regs, 10.0, y, SIDE_W - 20.0, 28.0, "target", 0, t.id)
         y += 30.0
 
-fn sidebar_nav(s State, mut ops List[app.Op], mut regs List[Region])
-    mut y := 184.0
-    items := [
-        ("", "Overview", "{mock.fmt_size(s.eff[0])}"),
-        ("safe", "Safe to delete", "{mock.fmt_size(mock.filter_total(s.m, "safe", s.eff))}"),
+## One line of the sidebar list: a heading (`id` empty, no size) or a view.
+pub struct NavItem
+    pub id str
+    pub name str
+    pub size str
+    pub head bool
+
+fn nav(id str, name str, size int) NavItem
+    NavItem(id: id, name: name, size: mock.fmt_size(size), head: false)
+
+fn head(name str) NavItem
+    NavItem(id: "", name: name, size: "", head: true)
+
+## What the sidebar lists: the overview, categories, finders and file kinds that have something.
+pub fn nav_items(s State) List[NavItem]
+    mut out := [
+        nav("", "Overview", s.eff[0]),
+        nav("safe", "Safe to delete", mock.filter_total(s.m, "safe", s.eff)),
     ]
-    y = nav_row(s, mut ops, mut regs, y, items[0].0, items[0].1, items[0].2)
-    y = nav_row(s, mut ops, mut regs, y, items[1].0, items[1].1, items[1].2)
-    ops.push(look.text(20.0, y + 14.0, "CATEGORIES", look.DIM, 10.0, true))
-    y += 34.0
+    mut cats := List[NavItem]()
     for c in mock.CATS
         total := mock.filter_total(s.m, c.0, s.eff)
         if total > 0
-            y = nav_row(s, mut ops, mut regs, y, c.0, c.1, mock.fmt_size(total))
+            cats.push(nav(c.0, c.1, total))
+    if not cats.is_empty()
+        out.push(head("CATEGORIES"))
+        out.extend(cats)
+    big := mock.filter_total(s.m, "big", s.eff)
+    old := mock.filter_total(s.m, "old", s.eff)
+    if big > 0 or old > 0
+        out.push(head("FIND"))
+        if big > 0
+            out.push(nav("big", "Large files", big))
+        if old > 0
+            out.push(nav("old", "Old files", old))
+    if not s.m.kinds.is_empty()
+        out.push(head("FILE TYPES"))
+        for k in s.m.kinds
+            out.push(nav("kind:{k.id}", k.name, k.bytes))
+    out
 
-fn nav_row(
-    s State,
-    mut ops List[app.Op],
-    mut regs List[Region],
-    y float,
-    id str,
-    name str,
-    size str,
-) float
-    on := s.filter == id
+NAV_Y := 176.0
+NAV_H := 26.0
+HEAD_ROW := 28.0
+
+## Where the sidebar list must end: above the Scan entries.
+fn nav_bottom(s State) float
+    s.h - 30.0 * s.targets.len().to_float() - 50.0
+
+## How far the sidebar list can scroll.
+pub fn side_max(s State) float
+    mut h := 0.0
+    for it in nav_items(s)
+        h += if it.head then HEAD_ROW else NAV_H
+    (NAV_Y + h - nav_bottom(s)).max(0.0)
+
+fn sidebar_nav(s State, mut ops List[app.Op], mut regs List[Region])
+    bottom := nav_bottom(s)
+    ops.push(app.Op.Clip(x: 0.0, y: NAV_Y, w: SIDE_W - 1.0, h: (bottom - NAV_Y).max(0.0)))
+    mut y := NAV_Y - s.side_top
+    for it in nav_items(s)
+        if it.head
+            ops.push(look.text(20.0, y + 12.0, it.name, look.DIM, 10.0, true))
+            y += HEAD_ROW
+            continue
+        if y + NAV_H > NAV_Y and y < bottom
+            nav_row(s, mut ops, mut regs, y, it, bottom)
+        y += NAV_H
+    ops.push(app.Op.Unclip)
+
+fn nav_row(s State, mut ops List[app.Op], mut regs List[Region], y float, it NavItem, bottom float)
+    on := s.filter == it.id
     if on
         look.round(
             mut ops,
             10.0,
             y,
             SIDE_W - 20.0,
-            28.0,
+            NAV_H - 2.0,
             7.0,
             look.mix(look.SIDE, look.ACCENT, 0.4),
             look.SIDE,
         )
-    ops.push(look.text(22.0, y + 7.0, name, if on then look.TEXT else 0xd1d1d6, 12.0, on))
     ops.push(look.text(
-        SIDE_W - 20.0 - look.width(size, 11.0),
-        y + 8.0,
-        size,
+        22.0,
+        y + 5.0,
+        look.fit(it.name, SIDE_W - 110.0, 12.0),
+        if on then look.TEXT else 0xd1d1d6,
+        12.0,
+        on,
+    ))
+    ops.push(look.text(
+        SIDE_W - 20.0 - look.width(it.size, 11.0),
+        y + 6.0,
+        it.size,
         look.DIM,
         11.0,
         false,
     ))
-    reg(mut regs, 10.0, y, SIDE_W - 20.0, 28.0, "nav", 0, id)
-    y + 30.0
+    top := y.max(NAV_Y)
+    reg(mut regs, 10.0, top, SIDE_W - 20.0, (y + NAV_H - 2.0).min(bottom) - top, "nav", 0, it.id)
 
 ## The toolbar: breadcrumb (or the view's name) on the left, scan state on the right.
 fn toolbar(s State, mut ops List[app.Op], mut regs List[Region])
@@ -618,7 +697,7 @@ fn footer(s State, mut ops List[app.Op], mut regs List[Region], y float)
         ops.push(look.text(
             x0 + 16.0,
             y + 19.0,
-            "Tick items to clear them out. Nothing is deleted until you confirm.",
+            "Tick items to clear them out; right-click one for more. Nothing is deleted until you confirm.",
             look.DIM,
             12.0,
             false,
@@ -659,7 +738,6 @@ fn sheet(s State, mut ops List[app.Op], mut regs List[Region])
     ph := 190.0 + shown.len().to_float() * 30.0 + (if cloud > 0 then 64.0 else 0.0)
     px := (s.w - pw) / 2.0
     py := ((s.h - ph) / 2.0).max(20.0)
-    # No alpha in the display list, so the sheet is a bordered panel over the window.
     look.round(mut ops, px - 1.0, py - 1.0, pw + 2.0, ph + 2.0, 13.0, look.LINE, look.BG)
     look.round(mut ops, px, py, pw, ph, 12.0, look.PANEL, look.LINE)
     ops.push(look.text(
@@ -850,6 +928,27 @@ fn admin_sheet(s State, mut ops List[app.Op], mut regs List[Region])
         "admin_go",
     )
 
+## The card under the pointer: name, size, safety, age and kind of the hovered tile or row.
+fn tooltip(s State, mut ops List[app.Op])
+    if s.hover < 0 or s.hover >= s.m.entries.len()
+        return
+    e := s.m.entries[s.hover]
+    mut facts := [mock.fmt_size(s.eff[s.hover]), look.safety_label(e.safety)]
+    if e.age != ""
+        facts.push("changed {e.age}")
+    if e.kind != ""
+        facts.push(kinds.name(e.kind))
+    line := facts.join(" · ")
+    tw := 320.0
+    th := 66.0
+    x := (s.hx + 14.0).min(s.w - tw - 8.0).max(8.0)
+    y := if s.hy + 18.0 + th > s.h then s.hy - th - 8.0 else s.hy + 18.0
+    look.round(mut ops, x - 1.0, y - 1.0, tw + 2.0, th + 2.0, 9.0, look.LINE, look.BG)
+    look.round(mut ops, x, y, tw, th, 8.0, look.mix(look.PANEL, 0xffffff, 0.06), look.LINE)
+    ops.push(look.text(x + 12.0, y + 9.0, look.fit(e.name, tw - 24.0, 12.0), look.TEXT, 12.0, true))
+    ops.push(look.text(x + 12.0, y + 27.0, look.fit(line, tw - 24.0, 11.0), look.safety_color(e.safety), 11.0, false))
+    ops.push(look.text(x + 12.0, y + 44.0, look.fit(e.reason, tw - 24.0, 11.0), look.DIM, 11.0, false))
+
 ## The whole frame for a window of `s.w` by `s.h`.
 ## The first screen: pick what to scan.
 fn welcome(s State, mut ops List[app.Op], mut regs List[Region])
@@ -945,6 +1044,10 @@ pub fn draw(s State) Frame
     sidebar(s, mut ops, mut regs)
     detail(s, mut ops, det_y)
     footer(s, mut ops, mut regs, foot_y)
+    if s.sheet
+        ops.push(app.Op.Shade(x: 0.0, y: 0.0, w: s.w, h: s.h, color: 0, alpha: 0.45))
+    else
+        tooltip(s, mut ops)
     if s.sheet and not s.admin.is_empty()
         admin_sheet(s, mut ops, mut regs)
     elif s.sheet
@@ -961,12 +1064,14 @@ pub fn hit(f Frame, x float, y float) Region?
         i -= 1
     none
 
-## How far the list can scroll.
-pub fn max_scroll(s State) float
-    n := s.shown().len().to_float()
+## The height of the list's rows area.
+pub fn list_height(s State) float
     foot_y := s.h - FOOT_H
     det_y := foot_y - DETAIL_H
     tm_y := TOOL_H + 12.0
     tm_h := ((det_y - tm_y) * 0.46).max(120.0)
-    top := tm_y + tm_h + 12.0 + HEAD_H
-    (n * ROW_H - (det_y - top)).max(0.0)
+    det_y - (tm_y + tm_h + 12.0 + HEAD_H)
+
+## How far the list can scroll.
+pub fn max_scroll(s State) float
+    (s.shown().len().to_float() * ROW_H - list_height(s)).max(0.0)

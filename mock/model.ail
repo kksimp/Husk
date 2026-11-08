@@ -3,6 +3,8 @@
 ## here (flat `Entry` list, parent before children, `safety` + `reason`) are
 ## what the GUI needs from it.
 
+use kinds
+
 ## One file or folder. `safety` is `safe` (can be deleted, regenerates),
 ## `review` (probably fine, look first) or `keep` (don't delete).
 pub struct Entry
@@ -19,11 +21,17 @@ pub struct Entry
     pub path str
     ## Inside iCloud Drive: removing offloads by default.
     pub icloud bool
+    ## Days since a file was modified; -1 for folders and the mock tree.
+    pub days int
+    ## The file kind (`kinds.of`); "" for folders.
+    pub kind str
 
 pub struct Model
     pub entries List[Entry]
     pub vol_total int
     pub vol_used int
+    ## Bytes per file kind over the whole scan, not only the entries listed.
+    pub kinds List[kinds.Kind]
 
 ## The category ids the sidebar lists, with their titles.
 pub CATS := [
@@ -38,7 +46,7 @@ pub CATS := [
 ]
 
 GB := 1073741824
-MB := 1048576
+pub MB := 1048576
 
 pub fn add(
     mut m Model,
@@ -64,6 +72,8 @@ pub fn add(
         age: age,
         path: "",
         icloud: false,
+        days: -1,
+        kind: "",
     ))
     if parent >= 0
         m.entries[parent].kids.push(id)
@@ -71,7 +81,7 @@ pub fn add(
 
 ## A fixed tree for layout work: a 512 GB Mac, 400 GB used.
 pub fn mock() Model
-    mut m := Model(entries: [], vol_total: 512 * GB, vol_used: 400 * GB)
+    mut m := Model(entries: [], vol_total: 512 * GB, vol_used: 400 * GB, kinds: [])
     root := add(mut m, -1, "Macintosh HD", 0, true, "keep", "Your startup disk", "", "")
     lib := add(
         mut m,
@@ -430,9 +440,34 @@ pub fn top_marks(m Model, marks Set[int]) List[int]
             out.push(id)
     out
 
+## Files at least this big are "large".
+pub BIG := 100 * MB
+## Files not modified for this many days are "old".
+pub OLD_DAYS := 365
+
+## Is `filter` one that `hit` answers (not a safety or category filter)?
+fn own_filter(filter str) bool
+    filter == "big" or filter == "old" or filter.starts_with("kind:") or filter.starts_with("find:")
+
+## Does entry `e` match the filter `big`, `old`, `kind:ID` or `find:TEXT`?
+pub fn hit(e Entry, filter str) bool
+    if filter == "big"
+        return not e.is_dir and e.size >= BIG
+    if filter == "old"
+        return not e.is_dir and e.days >= OLD_DAYS
+    k := filter.strip_prefix("kind:") else ""
+    if k != ""
+        return not e.is_dir and e.kind == k
+    q := filter.strip_prefix("find:") else ""
+    if q != ""
+        return e.name.to_lower().contains(q.to_lower())
+    false
+
 ## The entries a view shows. `filter` is empty (the children of `cur`),
-## `safe` (every safe entry whose parent is not safe) or a category id (the
-## top-most entries of that category).
+## `safe` (every safe entry whose parent is not safe), a category id (the
+## top-most entries of that category), `big` (large files), `old` (files not
+## changed for a year), `kind:ID` (files of a kind) or `find:TEXT` (top-most
+## entries whose name contains TEXT, ignoring case).
 pub fn rows(m Model, cur int, filter str, eff List[int]) List[int]
     mut out := List[int]()
     if filter == ""
@@ -445,6 +480,11 @@ pub fn rows(m Model, cur int, filter str, eff List[int]) List[int]
         if eff[id] <= 0
             continue
         pe := m.entries[e.parent]
+        if own_filter(filter)
+            # A folder that matches a search hides the matches inside it.
+            if hit(e, filter) and not (filter.starts_with("find:") and e.parent > 0 and hit(pe, filter))
+                out.push(id)
+            continue
         hit := if filter == "safe" then e.safety == "safe"
             and pe.safety != "safe" else e.cat == filter
             and pe.cat != filter
@@ -478,3 +518,21 @@ pub fn fmt_size(n int) str
     if n >= 1024
         return "{(x / 1024.0).round().to_int()} KB"
     "{n} B"
+
+@test fn file_views_list_matching_files()
+    mut m := Model(entries: [], vol_total: 0, vol_used: 0, kinds: [])
+    top := add(mut m, -1, "/u", 0, true, "keep", "", "", "")
+    d := add(mut m, top, "Caches", 0, true, "safe", "", "caches", "")
+    a := add(mut m, d, "big.mov", 200 * MB, false, "safe", "", "caches", "")
+    b := add(mut m, top, "old.zip", 5 * MB, false, "keep", "", "", "")
+    m.entries[a].kind = "video"
+    m.entries[a].days = 3
+    m.entries[b].kind = "archives"
+    m.entries[b].days = 900
+    finish(mut m)
+    eff := sizes(m, {})
+    assert_eq(rows(m, 0, "big", eff), [a])
+    assert_eq(rows(m, 0, "old", eff), [b])
+    assert_eq(rows(m, 0, "kind:video", eff), [a])
+    assert_eq(rows(m, 0, "find:CACHE", eff), [d])
+    assert_eq(rows(m, 0, "find:.mov", eff), [a])
