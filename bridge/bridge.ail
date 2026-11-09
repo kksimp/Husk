@@ -93,7 +93,14 @@ pub fn with_dupes(
     mut size := Map[str, int]()
     for e in s.files
         size[e.path] = e.bytes()
-    keep := groups.sorted(by: |g| -(size.get(g[0]) else 0) * (g.len() - 1)).take(MAX_GROUPS)
+    # Most wasted bytes first: the waste (below 2^42) packed above the index.
+    mut keys := List[int]()
+    for gi, g in groups.enumerate()
+        waste := ((size.get(g[0]) else 0) * (g.len() - 1)).min(4398046511103)
+        keys.push((4398046511103 - waste) * 1048576 + gi)
+    mut keep := List[List[str]]()
+    for k in keys.sorted().take(MAX_GROUPS)
+        keep.push(groups[k % 1048576])
     mut more := Set[str]()
     mut group := Map[str, int]()
     for gi, g in keep.enumerate()
