@@ -1,0 +1,210 @@
+## sheets: the confirmation sheet and the administrator sheet.
+
+use std.app
+use state
+use parts
+use mock
+use look
+
+## The confirmation sheet: exactly what goes to the Trash.
+pub fn sheet(s state.State, mut ops List[app.Op], mut regs List[state.Region])
+    parts.reg(mut regs, 0.0, 0.0, s.w, s.h, "scrim", 0, "")
+    top := mock.top_marks(s.m, s.marks)
+    shown := top.take(8)
+    pw := (s.w - 60.0).min(560.0)
+    mut cloud := 0
+    for id in top
+        if s.m.entries[id].icloud
+            cloud += 1
+    ph := 190.0 + shown.len().to_float() * 30.0 + (if cloud > 0 then 64.0 else 0.0)
+    px := (s.w - pw) / 2.0
+    py := ((s.h - ph) / 2.0).max(20.0)
+    look.round(mut ops, px - 1.0, py - 1.0, pw + 2.0, ph + 2.0, 13.0, look.LINE, look.BG)
+    look.round(mut ops, px, py, pw, ph, 12.0, look.PANEL, look.LINE)
+    ops.push(look.text(
+        px + 24.0,
+        py + 20.0,
+        "Move {top.len()} items to the Trash?",
+        look.TEXT,
+        16.0,
+        true,
+    ))
+    ops.push(look.text(
+        px + 24.0,
+        py + 46.0,
+        "Frees {mock.fmt_size(s.reclaim())}. They stay in the Trash until you empty it, and Undo puts them back.",
+        look.DIM,
+        11.0,
+        false,
+    ))
+    mut risky := 0
+    for n, id in shown.enumerate()
+        ry := py + 74.0 + n.to_float() * 30.0
+        e := s.m.entries[id]
+        if e.safety != "safe"
+            risky += 1
+        ops.push(look.text(
+            px + 24.0,
+            ry + 7.0,
+            look.fit(e.name, pw - 220.0, 12.0),
+            look.TEXT,
+            12.0,
+            false,
+        ))
+        parts.badge(mut ops, px + pw - 170.0, ry + 4.0, e.safety, look.PANEL)
+        sz := mock.fmt_size(s.eff[id])
+        ops.push(look.text(
+            px + pw - 24.0 - look.width(sz, 12.0),
+            ry + 7.0,
+            sz,
+            look.DIM,
+            12.0,
+            false,
+        ))
+    if top.len() > shown.len()
+        ops.push(look.text(
+            px + 24.0,
+            py + 74.0 + shown.len().to_float() * 30.0 + 6.0,
+            "and {top.len() - shown.len()} more",
+            look.DIM,
+            11.0,
+            false,
+        ))
+    for id in top
+        if s.m.entries[id].safety != "safe" and not shown.contains(id)
+            risky += 1
+    by := py + ph - 52.0
+    if risky > 0
+        ops.push(look.text(
+            px + 24.0,
+            by - 4.0,
+            "{risky} of these are not marked Safe. Check them before you go on.",
+            look.REVIEW,
+            11.0,
+            false,
+        ))
+    if cloud > 0
+        cy := by - 70.0
+        ops.push(look.text(
+            px + 24.0,
+            cy,
+            look.fit(
+                "{cloud} in iCloud Drive: only the copy on this Mac is removed. They stay in iCloud.",
+                pw - 48.0,
+                11.0,
+            ),
+            look.SAFE,
+            11.0,
+            false,
+        ))
+        parts.check(mut ops, px + 24.0, cy + 22.0, s.cloud_delete, look.PANEL)
+        ops.push(look.text(
+            px + 48.0,
+            cy + 22.0,
+            look.fit(
+                "Also delete them from iCloud (they vanish on all your devices)",
+                pw - 72.0,
+                11.0,
+            ),
+            if s.cloud_delete then look.KEEP else look.DIM,
+            11.0,
+            false,
+        ))
+        parts.reg(mut regs, px + 20.0, cy + 18.0, pw - 40.0, 24.0, "cloudbox", 0, "")
+    parts.button(
+        mut ops,
+        mut regs,
+        px + pw - 24.0 - 170.0 - 10.0 - 80.0,
+        by + 8.0,
+        80.0,
+        "Cancel",
+        false,
+        look.PANEL,
+        "cancel",
+    )
+    parts.button(
+        mut ops,
+        mut regs,
+        px + pw - 24.0 - 170.0,
+        by + 8.0,
+        170.0,
+        "Move to Trash",
+        true,
+        look.PANEL,
+        "trash",
+    )
+
+## Asks before deleting what the user's account can't: macOS shows its own password prompt.
+pub fn admin_sheet(s state.State, mut ops List[app.Op], mut regs List[state.Region])
+    parts.reg(mut regs, 0.0, 0.0, s.w, s.h, "scrim", 0, "")
+    pw := (s.w - 60.0).min(520.0)
+    shown := s.admin.take(4)
+    ph := 190.0 + shown.len().to_float() * 22.0
+    px := (s.w - pw) / 2.0
+    py := ((s.h - ph) / 2.0).max(20.0)
+    look.round(mut ops, px - 1.0, py - 1.0, pw + 2.0, ph + 2.0, 13.0, look.LINE, look.BG)
+    look.round(mut ops, px, py, pw, ph, 12.0, look.PANEL, look.LINE)
+    ops.push(look.text(
+        px + 24.0,
+        py + 20.0,
+        "Administrator permission needed",
+        look.TEXT,
+        16.0,
+        true,
+    ))
+    ops.push(look.text(
+        px + 24.0,
+        py + 46.0,
+        look.fit(
+            "{s.admin.len()} items belong to the system or another user, so your account can't remove them.",
+            pw - 48.0,
+            11.0,
+        ),
+        look.DIM,
+        11.0,
+        false,
+    ))
+    ops.push(look.text(
+        px + 24.0,
+        py + 64.0,
+        look.fit(
+            "macOS asks for your password. They are deleted for good, not moved to the Trash.",
+            pw - 48.0,
+            11.0,
+        ),
+        look.REVIEW,
+        11.0,
+        false,
+    ))
+    for n, id in shown.enumerate()
+        ops.push(look.text(
+            px + 24.0,
+            py + 90.0 + n.to_float() * 22.0,
+            look.fit(s.m.entries[id].path, pw - 48.0, 12.0),
+            look.TEXT,
+            12.0,
+            false,
+        ))
+    by := py + ph - 52.0
+    parts.button(
+        mut ops,
+        mut regs,
+        px + pw - 24.0 - 170.0 - 10.0 - 80.0,
+        by + 8.0,
+        80.0,
+        "Cancel",
+        false,
+        look.PANEL,
+        "cancel",
+    )
+    parts.button(
+        mut ops,
+        mut regs,
+        px + pw - 24.0 - 170.0,
+        by + 8.0,
+        170.0,
+        "Allow with password",
+        true,
+        look.PANEL,
+        "admin_go",
+    )

@@ -1,0 +1,74 @@
+## tiles: the treemap.
+
+use std.app
+use state
+use parts
+use mock
+use look
+use treemap
+
+## The treemap: one tile per shown entry, colored by how safe it is to delete.
+pub fn treemap_view(
+    s state.State,
+    ids List[int],
+    mut ops List[app.Op],
+    mut regs List[state.Region],
+    x float,
+    y float,
+    w float,
+    h float,
+)
+    parts.rect(mut ops, x, y, w, h, look.BG)
+    if ids.is_empty()
+        ops.push(look.text(
+            x + w / 2.0 - 60.0,
+            y + h / 2.0 - 8.0,
+            "Nothing here",
+            look.DIM,
+            13.0,
+            false,
+        ))
+        return
+    ranked := s.sorted_by_size(ids)
+    boxes := treemap.layout([s.eff[i] for i in ranked], x, y, w, h)
+    for n, b in boxes.enumerate()
+        id := ranked[n]
+        e := s.m.entries[id]
+        c := look.safety_color(e.safety)
+        shade := 0.34 + 0.05 * (n % 3).to_float()
+        parts.rect(
+            mut ops,
+            b.x + 1.0,
+            b.y + 1.0,
+            (b.w - 2.0).max(1.0),
+            (b.h - 2.0).max(1.0),
+            look.mix(look.BG, c, shade),
+        )
+        if id == s.sel
+            for edge in [
+                (0.0, 0.0, b.w, 2.0),
+                (0.0, b.h - 2.0, b.w, 2.0),
+                (0.0, 0.0, 2.0, b.h),
+                (b.w - 2.0, 0.0, 2.0, b.h),
+            ]
+                parts.rect(mut ops, b.x + edge.0, b.y + edge.1, edge.2, edge.3, 0xffffff)
+        if s.marks.contains(id)
+            ops.push(look.text(b.x + b.w - 20.0, b.y + 6.0, "✓", 0xffffff, 13.0, true))
+        if b.w > 76.0 and b.h > 38.0
+            ops.push(look.text(
+                b.x + 10.0,
+                b.y + 8.0,
+                look.fit(e.name, b.w - 36.0, 12.0),
+                0xffffff,
+                12.0,
+                true,
+            ))
+            ops.push(look.text(
+                b.x + 10.0,
+                b.y + 25.0,
+                mock.fmt_size(s.eff[id]),
+                look.mix(0xffffff, c, 0.2),
+                11.0,
+                false,
+            ))
+        parts.reg(mut regs, b.x, b.y, b.w, b.h, "tile", id, "")

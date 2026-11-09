@@ -1,0 +1,61 @@
+## bar: the toolbar.
+
+use std.app
+use state
+use parts
+use mock
+use look
+
+## The toolbar: breadcrumb (or the view's name) on the left, scan state on the right.
+pub fn toolbar(s state.State, mut ops List[app.Op], mut regs List[state.Region])
+    x0 := state.SIDE_W
+    parts.rect(mut ops, x0, 0.0, s.w - x0, state.TOOL_H, look.PANEL)
+    parts.rect(mut ops, x0, state.TOOL_H - 1.0, s.w - x0, 1.0, look.LINE)
+    mut x := x0 + 16.0
+    if s.filter == ""
+        trail := mock.trail(s.m, s.cur)
+        for i, id in trail.enumerate()
+            last := i == trail.len() - 1
+            name := s.m.entries[id].name
+            ops.push(look.text(x, 16.0, name, if last then look.TEXT else look.DIM, 13.0, last))
+            w := look.width(name, 13.0)
+            if not last
+                parts.reg(mut regs, x - 4.0, 8.0, w + 8.0, 32.0, "crumb", id, "")
+                ops.push(look.text(x + w + 6.0, 16.0, "›", look.DIM, 13.0, false))
+            x += w + 24.0
+    else
+        ops.push(look.text(x, 16.0, s.title(), look.TEXT, 13.0, true))
+    if s.pct < 1.0
+        pw := 160.0
+        px := s.w - pw - 20.0
+        look.round(
+            mut ops,
+            px,
+            21.0,
+            pw,
+            6.0,
+            3.0,
+            look.mix(look.PANEL, 0xffffff, 0.14),
+            look.PANEL,
+        )
+        look.round(mut ops, px, 21.0, (pw * s.pct).max(6.0), 6.0, 3.0, look.ACCENT, look.PANEL)
+        ops.push(look.text(
+            px - 12.0 - look.width(look.fit(s.scan_note, 260.0, 11.0), 11.0),
+            17.0,
+            look.fit(s.scan_note, 260.0, 11.0),
+            look.DIM,
+            11.0,
+            false,
+        ))
+    else
+        parts.button(
+            mut ops,
+            mut regs,
+            s.w - 96.0,
+            10.0,
+            80.0,
+            "Rescan",
+            false,
+            look.PANEL,
+            "rescan",
+        )

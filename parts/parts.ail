@@ -1,0 +1,63 @@
+## parts: small drawn pieces every part of the window shares (rect, reg, badge, button, check).
+
+use std.app
+use state
+use look
+
+pub fn rect(mut ops List[app.Op], x float, y float, w float, h float, c int)
+    ops.push(app.draw_rect(x, y, w, h, c))
+
+pub fn reg(
+    mut regs List[state.Region],
+    x float,
+    y float,
+    w float,
+    h float,
+    kind str,
+    k int,
+    arg str,
+)
+    regs.push(state.Region(x: x, y: y, w: w, h: h, kind: kind, k: k, arg: arg))
+
+pub fn badge(mut ops List[app.Op], x float, y float, safety str, bg int)
+    c := look.safety_color(safety)
+    look.round(mut ops, x, y, 56.0, 20.0, 10.0, look.mix(bg, c, 0.22), bg)
+    ops.push(look.text(
+        x + 28.0 - look.width(look.safety_label(safety), 11.0) / 2.0,
+        y + 4.0,
+        look.safety_label(safety),
+        c,
+        11.0,
+        true,
+    ))
+
+pub fn button(
+    mut ops List[app.Op],
+    mut regs List[state.Region],
+    x float,
+    y float,
+    w float,
+    label str,
+    primary bool,
+    bg int,
+    kind str,
+)
+    face := if primary then look.ACCENT else look.mix(bg, 0xffffff, 0.1)
+    look.round(mut ops, x, y, w, 28.0, 7.0, face, bg)
+    ops.push(look.text(
+        x + w / 2.0 - look.width(label, 12.0) / 2.0,
+        y + 7.0,
+        label,
+        0xffffff,
+        12.0,
+        primary,
+    ))
+    reg(mut regs, x, y, w, 28.0, kind, 0, "")
+
+pub fn check(mut ops List[app.Op], x float, y float, on bool, bg int)
+    if on
+        look.round(mut ops, x, y, 15.0, 15.0, 4.0, look.ACCENT, bg)
+        ops.push(look.text(x + 3.0, y + 1.0, "✓", 0xffffff, 11.0, true))
+    else
+        look.round(mut ops, x, y, 15.0, 15.0, 4.0, look.DIM, bg)
+        look.round(mut ops, x + 1.0, y + 1.0, 13.0, 13.0, 3.0, bg, look.DIM)
