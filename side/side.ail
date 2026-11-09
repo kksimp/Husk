@@ -151,7 +151,14 @@ fn sidebar_nav(s state.State, mut ops List[app.Op], mut regs List[state.Region])
         y += NAV_H
     ops.push(app.Op.Unclip)
 
-fn nav_row(s state.State, mut ops List[app.Op], mut regs List[state.Region], y float, it NavItem, bottom float)
+fn nav_row(
+    s state.State,
+    mut ops List[app.Op],
+    mut regs List[state.Region],
+    y float,
+    it NavItem,
+    bottom float,
+)
     on := s.filter == it.id
     if on
         look.round(
@@ -181,4 +188,13 @@ fn nav_row(s state.State, mut ops List[app.Op], mut regs List[state.Region], y f
         false,
     ))
     top := y.max(NAV_Y)
-    parts.reg(mut regs, 10.0, top, state.SIDE_W - 20.0, (y + NAV_H - 2.0).min(bottom) - top, "nav", 0, it.id)
+    parts.reg(
+        mut regs,
+        10.0,
+        top,
+        state.SIDE_W - 20.0,
+        (y + NAV_H - 2.0).min(bottom) - top,
+        "nav",
+        0,
+        it.id,
+    )

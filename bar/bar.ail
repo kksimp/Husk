@@ -48,4 +48,14 @@ pub fn toolbar(s state.State, mut ops List[app.Op], mut regs List[state.Region])
             false,
         ))
     else
-        parts.button(mut ops, mut regs, s.w - 96.0, 10.0, 80.0, "Rescan", false, look.PANEL, "rescan")
+        parts.button(
+            mut ops,
+            mut regs,
+            s.w - 96.0,
+            10.0,
+            80.0,
+            "Rescan",
+            false,
+            look.PANEL,
+            "rescan",
+        )

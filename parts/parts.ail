@@ -7,7 +7,16 @@ use look
 pub fn rect(mut ops List[app.Op], x float, y float, w float, h float, c int)
     ops.push(app.draw_rect(x, y, w, h, c))
 
-pub fn reg(mut regs List[state.Region], x float, y float, w float, h float, kind str, k int, arg str)
+pub fn reg(
+    mut regs List[state.Region],
+    x float,
+    y float,
+    w float,
+    h float,
+    kind str,
+    k int,
+    arg str,
+)
     regs.push(state.Region(x: x, y: y, w: w, h: h, kind: kind, k: k, arg: arg))
 
 pub fn badge(mut ops List[app.Op], x float, y float, safety str, bg int)
