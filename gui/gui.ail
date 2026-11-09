@@ -13,11 +13,14 @@ use view
 use bridge
 use scan
 use sysops
+use plan
 
 ## What to scan: the roots, and the name of the top entry of the result.
 struct Req
     roots List[str]
     label str
+    ## Look for duplicates in the last scan instead of scanning.
+    dupes bool
 
 struct Husk
     s view.State
@@ -117,6 +120,7 @@ fn Husk.handle(mut self, ev app.Event)
             s.notice = "{ev.text}. Type the folder in the field instead."
         "external" if ev.id == "scan" => progress(ev.text)
         "external" if ev.id == "scan_done" => finished()
+        "external" if ev.id == "dupes_done" => dupes_found()
         "external" if ev.id == "scan_failed" => failed(ev.text)
         _ => return
 
@@ -145,6 +149,34 @@ fn Husk.finished(mut self)
     s.pct = 1.0
     s.scan_note = ""
     s.notice = ""
+
+## Asks the scan task to compare the files of the last scan, unless a job is running.
+fn Husk.find_dupes(mut self)
+    if s.pct < 1.0
+        return
+    if s.m.entries.len() < 2 or s.m.entries[1].path == ""
+        s.notice = "This is sample data; scan a folder first."
+        return
+    s.pct = 0.5
+    s.scan_note = "Comparing files of the same size…"
+    s.notice = ""
+    reqs.send(Req(roots: [], label: "", dupes: true))
+
+## The duplicate search is done: take its tree and show the Duplicates view.
+fn Husk.dupes_found(mut self)
+    m := done.recv() else return
+    s.m = m
+    s.gone = {}
+    s.marks = {}
+    s.eff = mock.sizes(m, s.gone)
+    s.filter = "dupes"
+    s.find = ""
+    s.top = 0.0
+    s.sel = -1
+    s.pct = 1.0
+    s.scan_note = ""
+    n := mock.rows(m, 0, "dupes", s.eff).len()
+    s.notice = if n == 0 then "No duplicates over 1 MB." else ""
 
 fn Husk.failed(mut self, text str)
     s.pct = 1.0
@@ -216,7 +248,7 @@ fn Husk.start(mut self, id str)
     s.scan_note = roots.join(", ")
     s.notice = ""
     last = t
-    reqs.send(Req(roots: roots, label: label))
+    reqs.send(Req(roots: roots, label: label, dupes: false))
 
 fn Husk.go(mut self, id int)
     s.cur = id
@@ -319,6 +351,7 @@ fn Husk.finder(mut self, args List[str])
 fn Husk.click(mut self, x float, y float, clicks int)
     r := view.hit(f, x, y) else return
     match r.kind
+        "nav" if r.arg == "dupes" and not s.m.dupes_done => find_dupes()
         "nav" =>
             s.filter = r.arg
             s.find = ""
@@ -512,14 +545,33 @@ fn fresh() Husk
 
 ## A one-entry tree for before the first scan.
 fn placeholder() mock.Model
-    mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0, kinds: [])
+    mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0, kinds: [], dupes_done: false)
     mock.add(mut m, -1, "This Mac", 1, true, "keep", "", "", "")
     m
 
 ## The scan task: for each request, scan its roots, build the tree, tell the window.
+## Smallest file the duplicate search compares, and the largest.
+DUPE_MIN := 1048576
+DUPE_MAX := 4294967296
+
 fn scanner(inbox app.Inbox, reqs Channel[Req], done Channel[mock.Model])
+    # The last scan, kept for the duplicate search.
+    mut last := scan.Scan(root: "", files: [], dirs: {}, total: 0, errors: [])
+    mut last_label := ""
+    mut last_floor := 1
+    mut vol := fs.Volume(total: 0, free: 0)
     while true
         r := reqs.recv() else break
+        if r.dupes
+            groups := plan.duplicates(last, home(), DUPE_MIN, DUPE_MAX, false) else err
+                inbox.post(app.external("scan_failed", "comparing files: {err}"))
+                continue
+            mut tree := bridge.with_dupes(last, last_label, home(), time.now_ms(), last_floor, groups)
+            tree.vol_total = vol.total
+            tree.vol_used = vol.total - vol.free
+            done.send(tree)
+            inbox.post(app.external("dupes_done", ""))
+            continue
         n := r.roots.len()
         mut parts := List[scan.Scan]()
         mut files := 0
@@ -539,12 +591,12 @@ fn scanner(inbox app.Inbox, reqs Channel[Req], done Channel[mock.Model])
         merged := bridge.merge(parts)
         floor := (merged.total / 3000).max(1).min(67108864)
         mut tree := bridge.tree(merged, r.label, home(), time.now_ms(), floor)
-        v := fs.volume(r.roots[0]) else err
-            done.send(tree)
-            inbox.post(app.external("scan_done", ""))
-            continue
-        tree.vol_total = v.total
-        tree.vol_used = v.total - v.free
+        last = merged
+        last_label = r.label
+        last_floor = floor
+        vol = fs.volume(r.roots[0]) else fs.Volume(total: 0, free: 0)
+        tree.vol_total = vol.total
+        tree.vol_used = vol.total - vol.free
         done.send(tree)
         inbox.post(app.external("scan_done", ""))
 
@@ -697,3 +749,10 @@ pub fn run(root str)
     assert(h.s.sel != first)
     h.update(app.key(" "))
     assert(h.s.marks.contains(h.s.sel))
+
+@test fn duplicates_need_a_real_scan()
+    mut h := fresh()
+    h.find_dupes()
+    assert(h.s.notice.contains("sample"))
+    assert_eq(h.s.pct, 1.0)
+    assert(not [it for it in view.nav_items(h.s) if it.id == "dupes"].is_empty())

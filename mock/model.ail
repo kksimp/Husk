@@ -25,6 +25,8 @@ pub struct Entry
     pub days int
     ## The file kind (`kinds.of`); "" for folders.
     pub kind str
+    ## For an extra copy of a duplicate file: its group; -1 otherwise (the copy kept too).
+    pub dup int
 
 pub struct Model
     pub entries List[Entry]
@@ -32,6 +34,8 @@ pub struct Model
     pub vol_used int
     ## Bytes per file kind over the whole scan, not only the entries listed.
     pub kinds List[kinds.Kind]
+    ## Duplicates were looked for (the Duplicates view then lists what was found).
+    pub dupes_done bool
 
 ## The category ids the sidebar lists, with their titles.
 pub CATS := [
@@ -74,6 +78,7 @@ pub fn add(
         icloud: false,
         days: -1,
         kind: "",
+        dup: -1,
     ))
     if parent >= 0
         m.entries[parent].kids.push(id)
@@ -81,7 +86,7 @@ pub fn add(
 
 ## A fixed tree for layout work: a 512 GB Mac, 400 GB used.
 pub fn mock() Model
-    mut m := Model(entries: [], vol_total: 512 * GB, vol_used: 400 * GB, kinds: [])
+    mut m := Model(entries: [], vol_total: 512 * GB, vol_used: 400 * GB, kinds: [], dupes_done: false)
     root := add(mut m, -1, "Macintosh HD", 0, true, "keep", "Your startup disk", "", "")
     lib := add(
         mut m,
@@ -447,7 +452,11 @@ pub OLD_DAYS := 365
 
 ## Is `filter` one that `hit` answers (not a safety or category filter)?
 fn own_filter(filter str) bool
-    filter == "big" or filter == "old" or filter.starts_with("kind:") or filter.starts_with("find:")
+    filter == "big"
+        or filter == "old"
+        or filter == "dupes"
+        or filter.starts_with("kind:")
+        or filter.starts_with("find:")
 
 ## Does entry `e` match the filter `big`, `old`, `kind:ID` or `find:TEXT`?
 pub fn hit(e Entry, filter str) bool
@@ -455,6 +464,8 @@ pub fn hit(e Entry, filter str) bool
         return not e.is_dir and e.size >= BIG
     if filter == "old"
         return not e.is_dir and e.days >= OLD_DAYS
+    if filter == "dupes"
+        return e.dup >= 0
     k := filter.strip_prefix("kind:") else ""
     if k != ""
         return not e.is_dir and e.kind == k
@@ -523,7 +534,7 @@ pub fn fmt_size(n int) str
     "{n} B"
 
 @test fn file_views_list_matching_files()
-    mut m := Model(entries: [], vol_total: 0, vol_used: 0, kinds: [])
+    mut m := Model(entries: [], vol_total: 0, vol_used: 0, kinds: [], dupes_done: false)
     top := add(mut m, -1, "/u", 0, true, "keep", "", "", "")
     d := add(mut m, top, "Caches", 0, true, "safe", "", "caches", "")
     a := add(mut m, d, "big.mov", 200 * MB, false, "safe", "", "caches", "")

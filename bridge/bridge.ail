@@ -75,10 +75,49 @@ fn age_of(mtime_ms int, now_ms int) str
 
 ## The entry list for `s`: parents come before children.
 pub fn tree(s scan.Scan, label str, home str, now_ms int, min_bytes int) mock.Model
+    tree_with(s, label, home, now_ms, min_bytes, {})
+
+## Most duplicate groups the Duplicates view lists, the most wasted bytes first.
+MAX_GROUPS := 500
+
+## The tree with duplicate groups (`plan.duplicates`) listed: every copy is an entry,
+## and every copy but the first by path is marked `dup` with the kept one as its reason.
+pub fn with_dupes(
+    s scan.Scan,
+    label str,
+    home str,
+    now_ms int,
+    min_bytes int,
+    groups List[List[str]],
+) mock.Model
+    mut size := Map[str, int]()
+    for e in s.files
+        size[e.path] = e.bytes()
+    keep := groups.sorted(by: |g| -(size.get(g[0]) else 0) * (g.len() - 1)).take(MAX_GROUPS)
+    mut more := Set[str]()
+    mut group := Map[str, int]()
+    for gi, g in keep.enumerate()
+        for n, p in g.enumerate()
+            more.add(p)
+            if n > 0
+                group[p] = gi
+    mut m := tree_with(s, label, home, now_ms, min_bytes, more)
+    for id in 0..m.entries.len()
+        p := m.entries[id].path
+        if gi := group.get(p)
+            m.entries[id].dup = gi
+            m.entries[id].safety = "review"
+            m.entries[id].reason = "same bytes as {keep[gi][0]}; one copy is enough"
+    m.dupes_done = true
+    m
+
+fn tree_with(s scan.Scan, label str, home str, now_ms int, min_bytes int, more Set[str]) mock.Model
     rs := rules.builtin()
-    extra := extras(s, now_ms, min_bytes)
+    mut extra := extras(s, now_ms, min_bytes)
+    for p in more
+        extra.add(p)
     known := plan_markers(s)
-    mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0, kinds: kinds.totals(s.files))
+    mut m := mock.Model(entries: [], vol_total: 0, vol_used: 0, kinds: kinds.totals(s.files), dupes_done: false)
     top := mock.add(mut m, -1, label, s.total, true, "keep", "Everything Husk scanned", "", "")
     mut at := Map[str, int]()
     mut order := List[str]()
@@ -243,3 +282,22 @@ fn file_at(p str, n int, mtime int) model.Entry
     assert(names.contains("d"))
     assert_eq(m.entries[0].size, 905 * mock.MB)
     assert(m.kinds.len() >= 3)
+
+@test fn duplicates_are_listed_with_the_kept_copy()
+    now := 1000 * 86400000
+    files := [
+        file_at("/r/a/x.bin", 5 * mock.MB, now),
+        file_at("/r/b/x copy.bin", 5 * mock.MB, now),
+        file_at("/r/c/y.bin", 2 * mock.MB, now),
+    ]
+    mut dirs := Map[str, int]()
+    for d in ["/r", "/r/a", "/r/b", "/r/c"]
+        dirs[d] = 0
+    s := scan.Scan(root: "/r", files: files, dirs: dirs, total: 12 * mock.MB, errors: [])
+    m := with_dupes(s, "/r", "/home", now, 100 * mock.MB, [["/r/a/x.bin", "/r/b/x copy.bin"]])
+    assert(m.dupes_done)
+    eff := mock.sizes(m, {})
+    ids := mock.rows(m, 0, "dupes", eff)
+    assert_eq(ids.len(), 1)
+    assert_eq(m.entries[ids[0]].name, "x copy.bin")
+    assert(m.entries[ids[0]].reason.contains("/r/a/x.bin"))

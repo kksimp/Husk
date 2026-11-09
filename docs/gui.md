@@ -35,3 +35,4 @@ Wanted from ail: a native folder picker for std.app (NSOpenPanel), and scan prog
 - **Right-click menu:** Reveal in Finder, Open, Copy Path, Show in Enclosing Folder (in a filtered view), Look Inside, Tick / Untick. Double-click a file reveals it.
 - **Keys:** Up/Down select, Return looks inside or reveals, Space ticks, Escape cancels a sheet.
 - The sheet dims the window with `Shade`. The frame is drawn once per event and clicks and moves are hit-tested against it.
+- **Duplicates** (FIND): "Find…" compares the last scan's files from 1 MB to 4 GB (`plan.duplicates`: size, then first and last 4 KB, then SHA-256) in the scan task. The tree is rebuilt with every copy listed (`bridge.with_dupes`, the 500 groups that waste most); every copy but the first by path is marked PROBABLY_SAFE with the kept copy as its reason, and the Duplicates view lists those. Tick and Move to Trash as usual.

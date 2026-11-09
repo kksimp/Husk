@@ -176,6 +176,8 @@ fn State.title(self) str
         return "Large files (over {mock.fmt_size(mock.BIG)})"
     if filter == "old"
         return "Old files (not changed for a year)"
+    if filter == "dupes"
+        return "Duplicates: extra copies of identical files"
     if k := filter.strip_prefix("kind:")
         return kinds.name(k)
     if q := filter.strip_prefix("find:")
@@ -338,12 +340,15 @@ pub fn nav_items(s State) List[NavItem]
         out.extend(cats)
     big := mock.filter_total(s.m, "big", s.eff)
     old := mock.filter_total(s.m, "old", s.eff)
-    if big > 0 or old > 0
-        out.push(head("FIND"))
-        if big > 0
-            out.push(nav("big", "Large files", big))
-        if old > 0
-            out.push(nav("old", "Old files", old))
+    out.push(head("FIND"))
+    if big > 0
+        out.push(nav("big", "Large files", big))
+    if old > 0
+        out.push(nav("old", "Old files", old))
+    if s.m.dupes_done
+        out.push(nav("dupes", "Duplicates", mock.filter_total(s.m, "dupes", s.eff)))
+    else
+        out.push(NavItem(id: "dupes", name: "Duplicates", size: "Find…", head: false))
     if not s.m.kinds.is_empty()
         out.push(head("FILE TYPES"))
         for k in s.m.kinds
