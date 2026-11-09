@@ -1,0 +1,149 @@
+## info: the detail band, the footer and the hover card.
+
+use std.app
+use state
+use parts
+use kinds
+use mock
+use look
+
+## What Husk knows about the selected entry.
+pub fn detail(s state.State, mut ops List[app.Op], y float)
+    x0 := state.SIDE_W
+    parts.rect(mut ops, x0, y, s.w - x0, state.DETAIL_H, look.PANEL)
+    parts.rect(mut ops, x0, y, s.w - x0, 1.0, look.LINE)
+    if s.sel < 0
+        ops.push(look.text(
+            x0 + 16.0,
+            y + 24.0,
+            "Select an item to see why Husk suggests keeping or deleting it.",
+            look.DIM,
+            12.0,
+            false,
+        ))
+        return
+    e := s.m.entries[s.sel]
+    mut names := List[str]()
+    for i in mock.trail(s.m, s.sel)
+        names.push(s.m.entries[i].name)
+    path := names.join(" / ")
+    ops.push(look.text(x0 + 16.0, y + 10.0, e.name, look.TEXT, 13.0, true))
+    parts.badge(mut ops, x0 + 24.0 + look.width(e.name, 13.0), y + 8.0, e.safety, look.PANEL)
+    ops.push(look.text(
+        x0 + 16.0,
+        y + 30.0,
+        look.fit(e.reason, s.w - x0 - 32.0, 12.0),
+        look.TEXT,
+        12.0,
+        false,
+    ))
+    age := if e.age == "" then "" else " · last used {e.age}"
+    ops.push(look.text(
+        x0 + 16.0,
+        y + 48.0,
+        look.fit("{mock.fmt_size(s.eff[s.sel])}{age} · {path}", s.w - x0 - 32.0, 11.0),
+        look.DIM,
+        11.0,
+        false,
+    ))
+
+## The bottom bar: what is selected, or the undo for the last trash.
+pub fn footer(s state.State, mut ops List[app.Op], mut regs List[state.Region], y float)
+    x0 := state.SIDE_W
+    parts.rect(mut ops, x0, y, s.w - x0, state.FOOT_H, look.SIDE)
+    parts.rect(mut ops, x0, y, s.w - x0, 1.0, look.LINE)
+    n := mock.top_marks(s.m, s.marks).len()
+    if not s.undo.is_empty()
+        ops.push(look.text(
+            x0 + 16.0,
+            y + 19.0,
+            "Moved {s.undo.len()} items to the Trash",
+            look.SAFE,
+            12.0,
+            true,
+        ))
+        parts.button(mut ops, mut regs, x0 + 220.0, y + 13.0, 70.0, "Undo", false, look.SIDE, "undo")
+    elif s.notice != ""
+        ops.push(look.text(
+            x0 + 16.0,
+            y + 19.0,
+            look.fit(s.notice, s.w - x0 - 380.0, 12.0),
+            look.REVIEW,
+            12.0,
+            true,
+        ))
+    elif n > 0
+        ops.push(look.text(
+            x0 + 16.0,
+            y + 19.0,
+            "{n} selected · {mock.fmt_size(s.reclaim())} can be freed",
+            look.TEXT,
+            12.0,
+            true,
+        ))
+    else
+        ops.push(look.text(
+            x0 + 16.0,
+            y + 19.0,
+            "Tick items to clear them out; right-click one for more. Nothing is deleted until you confirm.",
+            look.DIM,
+            12.0,
+            false,
+        ))
+    parts.button(
+        mut ops,
+        mut regs,
+        s.w - 332.0,
+        y + 13.0,
+        120.0,
+        "Select all safe",
+        false,
+        look.SIDE,
+        "all_safe",
+    )
+    parts.button(
+        mut ops,
+        mut regs,
+        s.w - 202.0,
+        y + 13.0,
+        186.0,
+        "Review & Move to Trash…",
+        n > 0,
+        look.SIDE,
+        "review",
+    )
+
+## The card under the pointer: name, size, safety, age and kind of the hovered tile or row.
+pub fn tooltip(s state.State, mut ops List[app.Op])
+    if s.hover < 0 or s.hover >= s.m.entries.len()
+        return
+    e := s.m.entries[s.hover]
+    mut facts := [mock.fmt_size(s.eff[s.hover]), look.safety_label(e.safety)]
+    if e.age != ""
+        facts.push("changed {e.age}")
+    if e.kind != ""
+        facts.push(kinds.name(e.kind))
+    line := facts.join(" · ")
+    tw := 320.0
+    th := 66.0
+    x := (s.hx + 14.0).min(s.w - tw - 8.0).max(8.0)
+    y := if s.hy + 18.0 + th > s.h then s.hy - th - 8.0 else s.hy + 18.0
+    look.round(mut ops, x - 1.0, y - 1.0, tw + 2.0, th + 2.0, 9.0, look.LINE, look.BG)
+    look.round(mut ops, x, y, tw, th, 8.0, look.mix(look.PANEL, 0xffffff, 0.06), look.LINE)
+    ops.push(look.text(x + 12.0, y + 9.0, look.fit(e.name, tw - 24.0, 12.0), look.TEXT, 12.0, true))
+    ops.push(look.text(
+        x + 12.0,
+        y + 27.0,
+        look.fit(line, tw - 24.0, 11.0),
+        look.safety_color(e.safety),
+        11.0,
+        false,
+    ))
+    ops.push(look.text(
+        x + 12.0,
+        y + 44.0,
+        look.fit(e.reason, tw - 24.0, 11.0),
+        look.DIM,
+        11.0,
+        false,
+    ))

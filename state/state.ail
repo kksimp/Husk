@@ -1,0 +1,189 @@
+## state: the window's State, the click Region and Frame types, the size constants and the sort helpers.
+
+use std.app
+use kinds
+use mock
+
+## A place Husk can scan: `id` is what a click sends, `detail` says what it finds.
+pub struct Target
+    pub id str
+    pub label str
+    pub detail str
+
+## Everything the window needs to remember.
+pub struct State
+    pub m mock.Model
+    pub eff List[int]
+    pub gone Set[int]
+    pub marks Set[int]
+    pub cur int
+    pub filter str
+    pub sel int
+    pub sort_key str
+    pub desc bool
+    pub top float
+    pub sheet bool
+    pub undo List[int]
+    pub w float
+    pub h float
+    ## Scan progress 0 to 1; below 1 the toolbar shows a progress bar.
+    pub pct float
+    pub scan_note str
+    ## A line for the footer, such as why a move to the Trash failed.
+    pub notice str
+    ## False until the first scan finishes: the window then shows the welcome page.
+    pub scanned bool
+    pub targets List[Target]
+    ## The folder field's text.
+    pub path str
+    ## Also delete iCloud items from iCloud, not just offload them.
+    pub cloud_delete bool
+    ## Entries that need administrator rights to remove; non-empty shows the admin sheet.
+    pub admin List[int]
+    ## The tile or row under the pointer (-1: none) and where the pointer entered it.
+    pub hover int
+    pub hx float
+    pub hy float
+    ## The pointer's last x, so a scroll over the sidebar scrolls the sidebar.
+    pub mx float
+    ## How far the sidebar's list is scrolled.
+    pub side_top float
+    ## The search field's text.
+    pub find str
+
+## A rectangle that reacts to a click. `kind` says what; `k` is an entry id or
+## index, `arg` a filter or sort key.
+pub struct Region
+    pub x float
+    pub y float
+    pub w float
+    pub h float
+    pub kind str
+    pub k int
+    pub arg str
+
+pub struct Frame
+    pub ops List[app.Op]
+    pub regs List[Region]
+
+pub SIDE_W := 220.0
+pub TOOL_H := 48.0
+pub ROW_H := 30.0
+pub HEAD_H := 26.0
+pub DETAIL_H := 68.0
+pub FOOT_H := 54.0
+
+pub fn State.new(m mock.Model) State
+    State(
+        m: m,
+        eff: mock.sizes(m, {}),
+        gone: {},
+        marks: {},
+        cur: 0,
+        filter: "",
+        sel: -1,
+        sort_key: "size",
+        desc: true,
+        top: 0.0,
+        sheet: false,
+        undo: [],
+        w: 1100.0,
+        h: 720.0,
+        pct: 1.0,
+        scan_note: "",
+        notice: "",
+        scanned: false,
+        targets: [],
+        path: "",
+        cloud_delete: false,
+        admin: [],
+        hover: -1,
+        hx: 0.0,
+        hy: 0.0,
+        mx: 0.0,
+        side_top: 0.0,
+        find: "",
+    )
+
+## The ids the list and treemap show, in the order the user sorted them.
+pub fn State.shown(self) List[int]
+    ids := mock.rows(m, cur, filter, eff)
+    mut keys := List[int]()
+    if sort_key == "name"
+        mut names := List[str]()
+        for i in ids
+            names.push(m.entries[i].name.to_lower())
+        ranked := names.sorted()
+        for n in names
+            keys.push(ranked.index_of(n) else 0)
+    else
+        for i in ids
+            big := FAR - eff[i].min(FAR - 1)
+            keys.push(if sort_key == "safety" then rank(m.entries[i].safety) * FAR + big else big)
+    by := order(keys, ids)
+    if (sort_key == "size" and not desc)
+        or (sort_key == "safety" and desc)
+        or (sort_key == "name" and desc)
+        return flip(by)
+    by
+
+## Bytes (and ranks) are packed below this so `order` can sort plain ints.
+FAR := 1099511627776
+SLOT := 1048576
+
+## `ids` sorted by `keys` (each below 2^42), ties by id; both lists line up.
+fn order(keys List[int], ids List[int]) List[int]
+    mut packed := List[int]()
+    for n in 0..ids.len()
+        packed.push(keys[n] * SLOT + ids[n])
+    mut out := List[int]()
+    for c in packed.sorted()
+        out.push(c % SLOT)
+    out
+
+fn flip(xs List[int]) List[int]
+    mut out := List[int]()
+    mut i := xs.len() - 1
+    while i >= 0
+        out.push(xs[i])
+        i -= 1
+    out
+
+fn rank(s str) int
+    if s == "safe"
+        return 0
+    if s == "review"
+        return 1
+    2
+
+## Total bytes the marks would free.
+pub fn State.reclaim(self) int
+    mut t := 0
+    for id in mock.top_marks(m, marks)
+        t += eff[id]
+    t
+
+pub fn State.title(self) str
+    if filter == ""
+        return m.entries[cur].name
+    if filter == "safe"
+        return "Safe to delete"
+    if filter == "big"
+        return "Large files (over {mock.fmt_size(mock.BIG)})"
+    if filter == "old"
+        return "Old files (not changed for a year)"
+    if k := filter.strip_prefix("kind:")
+        return kinds.name(k)
+    if q := filter.strip_prefix("find:")
+        return "Names containing “{q}”"
+    for c in mock.CATS
+        if c.0 == filter
+            return c.1
+    filter
+
+## Ids by size, largest first, for the treemap.
+pub fn State.sorted_by_size(self, ids List[int]) List[int]
+    mut keys := List[int]()
+    for i in ids
+        keys.push(FAR - eff[i].min(FAR - 1))
+    order(keys, ids)

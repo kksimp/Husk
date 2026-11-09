@@ -1,0 +1,99 @@
+## rows: the sortable list under the treemap.
+
+use std.app
+use state
+use parts
+use mock
+use look
+
+## The sortable list under the treemap.
+pub fn list_view(
+    s state.State,
+    ids List[int],
+    mut ops List[app.Op],
+    mut regs List[state.Region],
+    y float,
+    bottom float,
+)
+    x0 := state.SIDE_W
+    avail := s.w - x0
+    cx := x0 + 16.0
+    nx := x0 + 44.0
+    nw := (avail * 0.26).max(150.0)
+    sx := nx + nw
+    bx := sx + 82.0
+    gx := bx + 120.0
+    rx := gx + 72.0
+    parts.rect(mut ops, x0, y, avail, state.HEAD_H, look.PANEL)
+    for h in [("name", "Name", nx), ("size", "Size", sx), ("safety", "Safety", gx)]
+        arrow := sort_arrow(s, h.0)
+        ops.push(look.text(
+            h.2,
+            y + 7.0,
+            "{h.1}{arrow}",
+            if s.sort_key == h.0 then look.TEXT else look.DIM,
+            11.0,
+            true,
+        ))
+        parts.reg(mut regs, h.2 - 6.0, y, 90.0, state.HEAD_H, "sort", 0, h.0)
+    ops.push(look.text(rx, y + 7.0, "Why", look.DIM, 11.0, true))
+    top := y + state.HEAD_H
+    parts.rect(mut ops, x0, top, avail, bottom - top, look.BG)
+    ops.push(app.Op.Clip(x: x0, y: top, w: avail, h: bottom - top))
+    mut big := 1
+    for i in ids
+        big = big.max(s.eff[i])
+    biggest := big.to_float()
+    for n, id in ids.enumerate()
+        ry := top + n.to_float() * state.ROW_H - s.top
+        if ry + state.ROW_H < top or ry > bottom
+            continue
+        e := s.m.entries[id]
+        mut bg := look.BG
+        if n % 2 == 1
+            bg = look.mix(look.BG, 0xffffff, 0.03)
+        if id == s.sel
+            bg = look.mix(look.BG, look.ACCENT, 0.35)
+        parts.rect(mut ops, x0, ry, avail, state.ROW_H, bg)
+        parts.check(mut ops, cx, ry + 7.0, s.marks.contains(id), bg)
+        vis := (bottom - ry).min(state.ROW_H)
+        parts.reg(mut regs, cx - 6.0, ry.max(top), 30.0, vis, "check", id, "")
+        mark := if e.is_dir then "▸ " else ""
+        ops.push(look.text(
+            nx,
+            ry + 8.0,
+            look.fit("{mark}{e.name}", nw - 8.0, 12.0),
+            look.TEXT,
+            12.0,
+            false,
+        ))
+        ops.push(look.text(sx, ry + 8.0, mock.fmt_size(s.eff[id]), look.DIM, 12.0, false))
+        c := look.safety_color(e.safety)
+        look.round(
+            mut ops,
+            bx,
+            ry + 11.0,
+            (104.0 * s.eff[id].to_float() / biggest).max(3.0),
+            8.0,
+            3.0,
+            look.mix(bg, c, 0.7),
+            bg,
+        )
+        parts.badge(mut ops, gx, ry + 5.0, e.safety, bg)
+        ops.push(look.text(
+            rx,
+            ry + 8.0,
+            look.fit(e.reason, s.w - rx - 16.0, 12.0),
+            look.DIM,
+            12.0,
+            false,
+        ))
+        parts.reg(mut regs, nx - 4.0, ry.max(top), s.w - nx, vis, "row", id, "")
+    ops.push(app.Op.Unclip)
+
+fn sort_arrow(s state.State, key str) str
+    if s.sort_key != key
+        return ""
+    if s.desc
+        return " ▾"
+    " ▴"

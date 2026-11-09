@@ -1,5 +1,5 @@
 ## Husk's window: finds what is using your disk and says what is safe to delete.
-## This file is the std.app shell: it owns the `State` (view/view.ail) and turns
+## This file is the std.app shell: it owns the `State` (state/state.ail) and turns
 ## events into changes. Run on macOS from the ail checkout:
 ##   tools/app-host/macos/run.sh path/to/husk/husk.ail gui [FOLDER]
 ## The window opens on a welcome page: pick Smart scan, a folder button, or type a
@@ -9,6 +9,8 @@
 use std.app
 use std.log
 use mock
+use state
+use side
 use view
 use bridge
 use scan
@@ -20,7 +22,7 @@ struct Req
     label str
 
 struct Husk
-    s view.State
+    s state.State
     ## Where the scan task leaves the finished tree.
     done Channel[mock.Model]
     ## Scan requests for the scan task.
@@ -30,7 +32,7 @@ struct Husk
     ## A folder dialog is open (std.app.21).
     picking bool
     ## The frame last drawn: clicks and pointer moves are looked up in it.
-    f view.Frame
+    f state.Frame
     ## The right-click menu while it is open (std.app.18) and the entry it is for.
     menu app.Popup?
     menu_for int
@@ -92,9 +94,9 @@ fn Husk.handle(mut self, ev app.Event)
             s.w = ev.dx
             s.h = ev.dy
             s.top = s.top.min(view.max_scroll(s))
-            s.side_top = s.side_top.min(view.side_max(s))
-        "scroll" if s.mx < view.SIDE_W =>
-            s.side_top = (s.side_top + ev.dy).max(0.0).min(view.side_max(s))
+            s.side_top = s.side_top.min(side.side_max(s))
+        "scroll" if s.mx < state.SIDE_W =>
+            s.side_top = (s.side_top + ev.dy).max(0.0).min(side.side_max(s))
         "scroll" =>
             s.top = (s.top + ev.dy).max(0.0).min(view.max_scroll(s))
         "click" if ev.id == "main" and ev.text == "left" => click(ev.x, ev.y, ev.clicks)
@@ -172,30 +174,30 @@ fn roots_of(id str) List[str]
         return ["{h}/{id.slice(2, id.len())}"]
     [id]
 
-fn targets() List[view.Target]
+fn targets() List[state.Target]
     [
-        view.Target(
+        state.Target(
             id: "smart",
             label: "Smart scan",
             detail: "Home, /Library and Applications: caches, Xcode data, simulators, wallpapers, installers",
         ),
-        view.Target(
+        state.Target(
             id: "choose",
             label: "Choose folder…",
             detail: "Pick any folder in the macOS dialog",
         ),
-        view.Target(id: "home", label: "Home folder", detail: "Everything in your user folder"),
-        view.Target(
+        state.Target(id: "home", label: "Home folder", detail: "Everything in your user folder"),
+        state.Target(
             id: "dev",
             label: "Xcode and simulators",
             detail: "~/Library/Developer: DerivedData, device support, simulator devices",
         ),
-        view.Target(
+        state.Target(
             id: "library",
             label: "Library",
             detail: "~/Library: app caches, logs, containers",
         ),
-        view.Target(
+        state.Target(
             id: "disk",
             label: "Whole disk",
             detail: "Every user, /Library, Applications; not macOS system files",
@@ -296,7 +298,7 @@ fn Husk.act(mut self, label str)
         go(e.parent)
         s.sel = id
         row := s.shown().index_of(id) else 0
-        s.top = (row.to_float() * view.ROW_H - 60.0).max(0.0).min(view.max_scroll(s))
+        s.top = (row.to_float() * state.ROW_H - 60.0).max(0.0).min(view.max_scroll(s))
     elif label == INTO
         go(id)
     elif label == MARK
@@ -477,11 +479,11 @@ fn Husk.key(mut self, name str)
             n = (at + 1).min(ids.len() - 1)
         s.sel = ids[n]
         # Keep the selected row in view.
-        ry := n.to_float() * view.ROW_H
+        ry := n.to_float() * state.ROW_H
         if ry < s.top
             s.top = ry
-        elif ry + view.ROW_H > s.top + view.list_height(s)
-            s.top = (ry + view.ROW_H - view.list_height(s)).min(view.max_scroll(s))
+        elif ry + state.ROW_H > s.top + view.list_height(s)
+            s.top = (ry + state.ROW_H - view.list_height(s)).min(view.max_scroll(s))
     elif k == "enter" and at >= 0
         e := s.m.entries[s.sel]
         if e.is_dir and not e.kids.is_empty()
@@ -495,12 +497,12 @@ fn Husk.key(mut self, name str)
 
 fn fresh() Husk
     mut h := Husk(
-        s: view.State.new(mock.mock()),
+        s: state.State.new(mock.mock()),
         done: Channel[mock.Model](1),
         reqs: Channel[Req](1),
         last: "home",
         picking: false,
-        f: view.Frame(ops: [], regs: []),
+        f: state.Frame(ops: [], regs: []),
         menu: none,
         menu_for: -1,
         out: [],
@@ -548,17 +550,32 @@ fn scanner(inbox app.Inbox, reqs Channel[Req], done Channel[mock.Model])
         done.send(tree)
         inbox.post(app.external("scan_done", ""))
 
+## Opens the window on the mock tree with no scan, for captures and review
+## (`husk gui --demo`).
+pub fn demo()
+    mut h := fresh()
+    inbox := app.new_inbox()
+    g := TaskGroup()
+    g.add(spawn scanner(inbox, h.reqs, h.done))
+    host := app.host_path() else err
+        print("no window: {err.kind}: {err.message}")
+        h.reqs.close()
+        return
+    app.run_with(mut h, host, [], inbox) else err
+        print("no window: {err.kind}: {err.message}")
+    h.reqs.close()
+
 ## Opens the window. A non-empty `root` is scanned at once.
 pub fn run(root str)
     done := Channel[mock.Model](1)
     reqs := Channel[Req](1)
     mut h := Husk(
-        s: view.State.new(placeholder()),
+        s: state.State.new(placeholder()),
         done: done,
         reqs: reqs,
         last: "",
         picking: false,
-        f: view.Frame(ops: [], regs: []),
+        f: state.Frame(ops: [], regs: []),
         menu: none,
         menu_for: -1,
         out: [],

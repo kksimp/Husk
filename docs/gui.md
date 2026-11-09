@@ -17,6 +17,10 @@ One `std.app` canvas (`husk.ail gui`, `view/view.ail`), Safari-style dark like G
 1. `fs.trash` (the sheet's Move to Trash only hides entries now), `fs.scan` progress events, `fs.volume`.
 2. Landed and used: hover `move`/`leave` (std.app.16), `clicks` (std.app.17), popup menus (std.app.18), `Shade` (std.app.19), clipboard (std.app.26). Still to adopt: host text measuring (std.app.13) in place of `look.width`.
 
+## Layout (H0)
+
+`view/view.ail` keeps `draw`, `hit`, `list_height` and `max_scroll`. The parts are modules: `state/` (`State`, `Target`, `Region`, `Frame`, size constants, sort helpers), `parts/` (`rect`, `reg`, `badge`, `button`, `check`), `side/` (sidebar and its list), `bar/` (toolbar), `tiles/` (treemap), `rows/` (list), `info/` (detail band, footer, hover card), `sheets/` (review and admin sheets), `hello/` (welcome). `husk gui --demo` opens the mock tree with no scan, for captures and review.
+
 Not built or run yet: builds happen on Kaleb's machines.
 
 ## Scanning (2026-11-06)

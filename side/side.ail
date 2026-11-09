@@ -1,0 +1,184 @@
+## side: the sidebar.
+
+use std.app
+use state
+use parts
+use mock
+use look
+
+## The sidebar: title, the volume bar, and what to look at.
+pub fn sidebar(s state.State, mut ops List[app.Op], mut regs List[state.Region])
+    parts.rect(mut ops, 0.0, 0.0, state.SIDE_W, s.h, look.SIDE)
+    parts.rect(mut ops, state.SIDE_W - 1.0, 0.0, 1.0, s.h, look.LINE)
+    ops.push(look.text(20.0, 18.0, "Husk", look.TEXT, 20.0, true))
+    ops.push(look.text(20.0, 44.0, "What is using your disk", look.DIM, 11.0, false))
+    if not s.scanned
+        sidebar_targets(s, mut ops, mut regs)
+        return
+    # The volume card.
+    ops.push(look.text(20.0, 82.0, "Macintosh HD", look.TEXT, 12.0, true))
+    bw := state.SIDE_W - 40.0
+    if s.m.vol_total <= 0
+        # No volume numbers (fs.volume, ADR 0928): show what the scan found.
+        ops.push(look.text(
+            20.0,
+            104.0,
+            "{mock.fmt_size(s.eff[0])} scanned",
+            look.TEXT,
+            12.0,
+            false,
+        ))
+        if s.reclaim() > 0
+            ops.push(look.text(
+                20.0,
+                124.0,
+                "{mock.fmt_size(s.reclaim())} can be freed",
+                look.SAFE,
+                11.0,
+                false,
+            ))
+        sidebar_nav(s, mut ops, mut regs)
+        sidebar_targets(s, mut ops, mut regs)
+        return
+    look.round(mut ops, 20.0, 104.0, bw, 8.0, 4.0, look.mix(look.SIDE, 0xffffff, 0.12), look.SIDE)
+    used := s.m.vol_used.to_float() / s.m.vol_total.to_float()
+    uw := bw * used
+    look.round(mut ops, 20.0, 104.0, uw, 8.0, 4.0, look.ACCENT, look.SIDE)
+    rec := (s.reclaim().to_float() / s.m.vol_total.to_float() * bw).min(uw)
+    if rec > 2.0
+        look.round(mut ops, 20.0 + uw - rec, 104.0, rec, 8.0, 4.0, look.SAFE, look.SIDE)
+    free := s.m.vol_total - s.m.vol_used
+    ops.push(look.text(
+        20.0,
+        120.0,
+        "{mock.fmt_size(s.m.vol_used)} of {mock.fmt_size(s.m.vol_total)} used",
+        look.DIM,
+        11.0,
+        false,
+    ))
+    ops.push(look.text(20.0, 136.0, "{mock.fmt_size(free)} free", look.TEXT, 11.0, false))
+    if s.reclaim() > 0
+        ops.push(look.text(
+            20.0,
+            152.0,
+            "{mock.fmt_size(free + s.reclaim())} free after cleanup",
+            look.SAFE,
+            11.0,
+            false,
+        ))
+    sidebar_nav(s, mut ops, mut regs)
+    sidebar_targets(s, mut ops, mut regs)
+
+## "Scan" entries pinned to the bottom of the sidebar.
+fn sidebar_targets(s state.State, mut ops List[app.Op], mut regs List[state.Region])
+    mut y := s.h - 30.0 * s.targets.len().to_float() - 34.0
+    parts.rect(mut ops, 10.0, y - 8.0, state.SIDE_W - 20.0, 1.0, look.LINE)
+    ops.push(look.text(20.0, y + 4.0, "SCAN", look.DIM, 10.0, true))
+    y += 24.0
+    for t in s.targets
+        ops.push(look.text(22.0, y + 7.0, t.label, 0xd1d1d6, 12.0, false))
+        parts.reg(mut regs, 10.0, y, state.SIDE_W - 20.0, 28.0, "target", 0, t.id)
+        y += 30.0
+
+## One line of the sidebar list: a heading (`id` empty, no size) or a view.
+pub struct NavItem
+    pub id str
+    pub name str
+    pub size str
+    pub head bool
+
+fn nav(id str, name str, size int) NavItem
+    NavItem(id: id, name: name, size: mock.fmt_size(size), head: false)
+
+fn head(name str) NavItem
+    NavItem(id: "", name: name, size: "", head: true)
+
+## What the sidebar lists: the overview, categories, finders and file kinds that have something.
+pub fn nav_items(s state.State) List[NavItem]
+    mut out := [nav("", "Overview", s.eff[0]), nav(
+        "safe",
+        "Safe to delete",
+        mock.filter_total(s.m, "safe", s.eff),
+    )]
+    mut cats := List[NavItem]()
+    for c in mock.CATS
+        total := mock.filter_total(s.m, c.0, s.eff)
+        if total > 0
+            cats.push(nav(c.0, c.1, total))
+    if not cats.is_empty()
+        out.push(head("CATEGORIES"))
+        out.extend(cats)
+    big := mock.filter_total(s.m, "big", s.eff)
+    old := mock.filter_total(s.m, "old", s.eff)
+    if big > 0 or old > 0
+        out.push(head("FIND"))
+        if big > 0
+            out.push(nav("big", "Large files", big))
+        if old > 0
+            out.push(nav("old", "Old files", old))
+    if not s.m.kinds.is_empty()
+        out.push(head("FILE TYPES"))
+        for k in s.m.kinds
+            out.push(nav("kind:{k.id}", k.name, k.bytes))
+    out
+
+NAV_Y := 176.0
+NAV_H := 26.0
+HEAD_ROW := 28.0
+
+## Where the sidebar list must end: above the Scan entries.
+fn nav_bottom(s state.State) float
+    s.h - 30.0 * s.targets.len().to_float() - 50.0
+
+## How far the sidebar list can scroll.
+pub fn side_max(s state.State) float
+    mut h := 0.0
+    for it in nav_items(s)
+        h += if it.head then HEAD_ROW else NAV_H
+    (NAV_Y + h - nav_bottom(s)).max(0.0)
+
+fn sidebar_nav(s state.State, mut ops List[app.Op], mut regs List[state.Region])
+    bottom := nav_bottom(s)
+    ops.push(app.Op.Clip(x: 0.0, y: NAV_Y, w: state.SIDE_W - 1.0, h: (bottom - NAV_Y).max(0.0)))
+    mut y := NAV_Y - s.side_top
+    for it in nav_items(s)
+        if it.head
+            ops.push(look.text(20.0, y + 12.0, it.name, look.DIM, 10.0, true))
+            y += HEAD_ROW
+            continue
+        if y + NAV_H > NAV_Y and y < bottom
+            nav_row(s, mut ops, mut regs, y, it, bottom)
+        y += NAV_H
+    ops.push(app.Op.Unclip)
+
+fn nav_row(s state.State, mut ops List[app.Op], mut regs List[state.Region], y float, it NavItem, bottom float)
+    on := s.filter == it.id
+    if on
+        look.round(
+            mut ops,
+            10.0,
+            y,
+            state.SIDE_W - 20.0,
+            NAV_H - 2.0,
+            7.0,
+            look.mix(look.SIDE, look.ACCENT, 0.4),
+            look.SIDE,
+        )
+    ops.push(look.text(
+        22.0,
+        y + 5.0,
+        look.fit(it.name, state.SIDE_W - 110.0, 12.0),
+        if on then look.TEXT else 0xd1d1d6,
+        12.0,
+        on,
+    ))
+    ops.push(look.text(
+        state.SIDE_W - 20.0 - look.width(it.size, 11.0),
+        y + 6.0,
+        it.size,
+        look.DIM,
+        11.0,
+        false,
+    ))
+    top := y.max(NAV_Y)
+    parts.reg(mut regs, 10.0, top, state.SIDE_W - 20.0, (y + NAV_H - 2.0).min(bottom) - top, "nav", 0, it.id)
