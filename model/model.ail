@@ -35,10 +35,10 @@ pub struct Entry
     pub is_symlink bool
 
 pub fn Entry.bytes(self) int
-    if alloc > 0
-        alloc
+    if self.alloc > 0
+        self.alloc
     else
-        size
+        self.size
 
 pub struct Verdict
     pub rating Rating

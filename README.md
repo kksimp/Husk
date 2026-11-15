@@ -1,6 +1,6 @@
 # Husk
 
-A fast disk-space analyzer for macOS written in [AIL](https://github.com/kksimp/ail). It totals every folder, then says what is safe to delete and why. Husk only moves things to the Trash.
+A fast disk-space analyzer for macOS written in [AIL](https://github.com/kksimp/ail) (built against ail v0.1.0, see `.ail-version`). It totals every folder, then says what is safe to delete and why. Husk only moves things to the Trash.
 
 ```sh
 ./ail run husk.ail scan --top 15 ~            # biggest folders

@@ -107,23 +107,23 @@ pub fn State.new(m mock.Model) State
 
 ## The ids the list and treemap show, in the order the user sorted them.
 pub fn State.shown(self) List[int]
-    ids := mock.rows(m, cur, filter, eff)
+    ids := mock.rows(self.m, self.cur, self.filter, self.eff)
     mut keys := List[int]()
-    if sort_key == "name"
+    if self.sort_key == "name"
         mut names := List[str]()
         for i in ids
-            names.push(m.entries[i].name.to_lower())
+            names.push(self.m.entries[i].name.to_lower())
         ranked := names.sorted()
         for n in names
             keys.push(ranked.index_of(n) else 0)
     else
         for i in ids
-            big := FAR - eff[i].min(FAR - 1)
-            keys.push(if sort_key == "safety" then rank(m.entries[i].safety) * FAR + big else big)
+            big := FAR - self.eff[i].min(FAR - 1)
+            keys.push(if self.sort_key == "safety" then rank(self.m.entries[i].safety) * FAR + big else big)
     by := order(keys, ids)
-    if (sort_key == "size" and not desc)
-        or (sort_key == "safety" and desc)
-        or (sort_key == "name" and desc)
+    if (self.sort_key == "size" and not self.desc)
+        or (self.sort_key == "safety" and self.desc)
+        or (self.sort_key == "name" and self.desc)
         return flip(by)
     by
 
@@ -159,31 +159,31 @@ fn rank(s str) int
 ## Total bytes the marks would free.
 pub fn State.reclaim(self) int
     mut t := 0
-    for id in mock.top_marks(m, marks)
-        t += eff[id]
+    for id in mock.top_marks(self.m, self.marks)
+        t += self.eff[id]
     t
 
 pub fn State.title(self) str
-    if filter == ""
-        return m.entries[cur].name
-    if filter == "safe"
+    if self.filter == ""
+        return self.m.entries[self.cur].name
+    if self.filter == "safe"
         return "Safe to delete"
-    if filter == "big"
+    if self.filter == "big"
         return "Large files (over {mock.fmt_size(mock.BIG)})"
-    if filter == "old"
+    if self.filter == "old"
         return "Old files (not changed for a year)"
-    if k := filter.strip_prefix("kind:")
+    if k := self.filter.strip_prefix("kind:")
         return kinds.name(k)
-    if q := filter.strip_prefix("find:")
+    if q := self.filter.strip_prefix("find:")
         return "Names containing “{q}”"
     for c in mock.CATS
-        if c.0 == filter
+        if c.0 == self.filter
             return c.1
-    filter
+    self.filter
 
 ## Ids by size, largest first, for the treemap.
 pub fn State.sorted_by_size(self, ids List[int]) List[int]
     mut keys := List[int]()
     for i in ids
-        keys.push(FAR - eff[i].min(FAR - 1))
+        keys.push(FAR - self.eff[i].min(FAR - 1))
     order(keys, ids)
