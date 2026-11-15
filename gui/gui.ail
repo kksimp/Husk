@@ -41,39 +41,39 @@ struct Husk
 
 impl app.App for Husk
     fn update(mut self, ev app.Event)
-        if ev.kind == "move" or ev.kind == "leave"
-            if not pointer(ev)
+        if ev.kind == app.EventKind.Move or ev.kind == app.EventKind.Leave
+            if not self.pointer(ev)
                 return
         else
-            handle(ev)
-        f = view.draw(s)
+            self.handle(ev)
+        self.f = view.draw(self.s)
 
     fn view(self) app.Node
         app.column([
             app.row([
-                app.field("path", s.path, "Folder to scan, such as ~/Library (~ is your home)"),
+                app.field("path", self.s.path, "Folder to scan, such as ~/Library (~ is your home)"),
                 app.button("go", "Scan"),
-                app.field("find", s.find, "Search names"),
+                app.field("find", self.s.find, "Search names"),
             ]),
-            app.canvas("main", 0.0, 0.0, f.ops),
+            app.canvas("main", 0.0, 0.0, self.f.ops),
         ])
 
     fn title(self) str
         "Husk"
 
     fn hover(self) bool
-        s.scanned
+        self.s.scanned
 
     fn popup(self) app.Popup?
-        menu
+        self.menu
 
     fn lines(mut self) List[str]
-        sent := out
-        out = []
+        sent := self.out
+        self.out = []
         sent
 
     fn pick(self) app.Picker?
-        if picking
+        if self.picking
             return app.Picker(
                 id: "folder",
                 prompt: "Choose a folder to scan",
@@ -83,43 +83,47 @@ impl app.App for Husk
         none
 
     fn focus(self) str
-        if s.scanned
+        if self.s.scanned
             return ""
         "path"
 
-## One event other than a pointer move.
-fn Husk.handle(mut self, ev app.Event)
+## One event other than a pointer move. Kinds it does not use fall to `_`.
+@allow("expr.match.3") fn Husk.handle(mut self, ev app.Event)
     match ev.kind
-        "resize" if ev.id == "main" =>
-            s.w = ev.dx
-            s.h = ev.dy
-            s.top = s.top.min(view.max_scroll(s))
-            s.side_top = s.side_top.min(side.side_max(s))
-        "scroll" if s.mx < state.SIDE_W =>
-            s.side_top = (s.side_top + ev.dy).max(0.0).min(side.side_max(s))
-        "scroll" =>
-            s.top = (s.top + ev.dy).max(0.0).min(view.max_scroll(s))
-        "click" if ev.id == "main" and ev.text == "left" => click(ev.x, ev.y, ev.clicks)
-        "click" if ev.id == "main" and ev.text == "right" => context(ev.x, ev.y)
-        "popup" =>
-            menu = none
-            act(ev.text)
-        "key" => key(ev.text)
-        "edit" if ev.id == "path" => s.path = ev.text
-        "edit" if ev.id == "find" => search(ev.text)
-        "submit" if ev.id == "path" => start(s.path)
-        "press" if ev.id == "go" => start(s.path)
-        "picked" =>
-            picking = false
+        app.EventKind.Resize if ev.id == "main" =>
+            self.s.w = ev.dx
+            self.s.h = ev.dy
+            self.s.top = self.s.top.min(view.max_scroll(self.s))
+            self.s.side_top = self.s.side_top.min(side.side_max(self.s))
+        app.EventKind.Scroll if self.s.mx < state.SIDE_W =>
+            self.s.side_top = (self.s.side_top + ev.dy).max(0.0).min(side.side_max(self.s))
+        app.EventKind.Scroll =>
+            self.s.top = (self.s.top + ev.dy).max(0.0).min(view.max_scroll(self.s))
+        app.EventKind.Click if ev.id == "main" and ev.text == "left" => self.click(
+            ev.x,
+            ev.y,
+            ev.clicks,
+        )
+        app.EventKind.Click if ev.id == "main" and ev.text == "right" => self.context(ev.x, ev.y)
+        app.EventKind.Popup =>
+            self.menu = none
+            self.act(ev.text)
+        app.EventKind.Key => self.key(ev.text)
+        app.EventKind.Edit if ev.id == "path" => self.s.path = ev.text
+        app.EventKind.Edit if ev.id == "find" => self.search(ev.text)
+        app.EventKind.Submit if ev.id == "path" => self.start(self.s.path)
+        app.EventKind.Press if ev.id == "go" => self.start(self.s.path)
+        app.EventKind.Picked =>
+            self.picking = false
             if ev.text != ""
-                s.path = ev.text
-                start(ev.text)
-        "pick_error" =>
-            picking = false
-            s.notice = "{ev.text}. Type the folder in the field instead."
-        "external" if ev.id == "scan" => progress(ev.text)
-        "external" if ev.id == "scan_done" => finished()
-        "external" if ev.id == "scan_failed" => failed(ev.text)
+                self.s.path = ev.text
+                self.start(ev.text)
+        app.EventKind.PickError =>
+            self.picking = false
+            self.s.notice = "{ev.text}. Type the folder in the field instead."
+        app.EventKind.External if ev.id == "scan" => self.progress(ev.text)
+        app.EventKind.External if ev.id == "scan_done" => self.finished()
+        app.EventKind.External if ev.id == "scan_failed" => self.failed(ev.text)
         _ => return
 
 ## A scan update from the scanner: `pct|files|path`.
@@ -127,30 +131,30 @@ fn Husk.progress(mut self, text str)
     parts := text.split("|")
     if parts.len() < 3
         return
-    s.pct = (parts[0].to_float() else 1.0).max(0.0).min(1.0)
-    s.scan_note = "{parts[1]} files · {parts[2]}"
+    self.s.pct = (parts[0].to_float() else 1.0).max(0.0).min(1.0)
+    self.s.scan_note = "{parts[1]} files · {parts[2]}"
 
 ## The scan task is done: take its tree.
 fn Husk.finished(mut self)
-    m := done.recv() else return
-    s.m = m
-    s.gone = {}
-    s.marks = {}
-    s.eff = mock.sizes(m, s.gone)
-    s.cur = 0
+    m := self.done.recv() else return
+    self.s.m = m
+    self.s.gone = {}
+    self.s.marks = {}
+    self.s.eff = mock.sizes(m, self.s.gone)
+    self.s.cur = 0
     if m.entries[0].kids.len() == 1
-        s.cur = m.entries[0].kids[0]
-    s.filter = ""
-    s.scanned = true
-    s.top = 0.0
-    s.sel = -1
-    s.pct = 1.0
-    s.scan_note = ""
-    s.notice = ""
+        self.s.cur = m.entries[0].kids[0]
+    self.s.filter = ""
+    self.s.scanned = true
+    self.s.top = 0.0
+    self.s.sel = -1
+    self.s.pct = 1.0
+    self.s.scan_note = ""
+    self.s.notice = ""
 
 fn Husk.failed(mut self, text str)
-    s.pct = 1.0
-    s.notice = "Scan failed: {text}"
+    self.s.pct = 1.0
+    self.s.notice = "Scan failed: {text}"
 
 fn home() str
     env.home() else "/"
@@ -208,67 +212,67 @@ fn targets() List[state.Target]
 fn Husk.start(mut self, id str)
     t := id.trim()
     if t == "choose"
-        picking = true
+        self.picking = true
         return
-    if t == "" or s.pct < 1.0
+    if t == "" or self.s.pct < 1.0
         return
     roots := roots_of(t)
     label := if roots.len() == 1 then roots[0] else "This Mac"
-    s.pct = 0.02
-    s.scan_note = roots.join(", ")
-    s.notice = ""
-    last = t
-    reqs.send(Req(roots: roots, label: label))
+    self.s.pct = 0.02
+    self.s.scan_note = roots.join(", ")
+    self.s.notice = ""
+    self.last = t
+    self.reqs.send(Req(roots: roots, label: label))
 
 fn Husk.go(mut self, id int)
-    s.cur = id
-    s.filter = ""
-    s.sel = -1
-    s.top = 0.0
+    self.s.cur = id
+    self.s.filter = ""
+    self.s.sel = -1
+    self.s.top = 0.0
 
 ## A pointer `move` or `leave`: true when the hovered tile or row changed, so the
 ## tooltip must be drawn again. The tooltip stays where the pointer entered.
 fn Husk.pointer(mut self, ev app.Event) bool
     mut id := -1
-    if ev.kind == "move"
-        s.mx = ev.x
-        if r := view.hit(f, ev.x, ev.y)
+    if ev.kind == app.EventKind.Move
+        self.s.mx = ev.x
+        if r := view.hit(self.f, ev.x, ev.y)
             if r.kind == "tile" or r.kind == "row"
                 id = r.k
-    if id == s.hover
+    if id == self.s.hover
         return false
-    s.hover = id
-    s.hx = ev.x
-    s.hy = ev.y
+    self.s.hover = id
+    self.s.hx = ev.x
+    self.s.hy = ev.y
     true
 
 ## The search field changed: show the entries whose names contain the text.
 fn Husk.search(mut self, text str)
-    s.find = text
+    self.s.find = text
     q := text.trim()
-    s.filter = if q == "" then "" else "find:{q}"
-    s.sel = -1
-    s.top = 0.0
+    self.s.filter = if q == "" then "" else "find:{q}"
+    self.s.sel = -1
+    self.s.top = 0.0
 
 ## A right-click on a tile or row selects it and opens its menu.
 fn Husk.context(mut self, x float, y float)
-    r := view.hit(f, x, y) else return
+    r := view.hit(self.f, x, y) else return
     if r.kind != "tile" and r.kind != "row" and r.kind != "check"
         return
-    s.sel = r.k
-    s.hover = -1
-    menu_for = r.k
-    menu = app.Popup(id: "item", x: x, y: y, items: menu_items(r.k))
+    self.s.sel = r.k
+    self.s.hover = -1
+    self.menu_for = r.k
+    self.menu = app.Popup(id: "item", x: x, y: y, items: self.menu_items(r.k))
 
 ## The right-click menu for entry `id`.
 fn Husk.menu_items(self, id int) List[str]
-    e := s.m.entries[id]
+    e := self.s.m.entries[id]
     mut items := [REVEAL, OPEN, COPY]
-    if s.filter != ""
+    if self.s.filter != ""
         items.push(SHOW)
     if e.is_dir and not e.kids.is_empty()
         items.push(INTO)
-    items.push(if s.marks.contains(id) then UNMARK else MARK)
+    items.push(if self.s.marks.contains(id) then UNMARK else MARK)
     items
 
 REVEAL := "Reveal in Finder"
@@ -281,87 +285,87 @@ UNMARK := "Untick"
 
 ## A menu choice for the entry the menu was opened on; `""` is a dismissed menu.
 fn Husk.act(mut self, label str)
-    id := menu_for
-    if id < 0 or id >= s.m.entries.len()
+    id := self.menu_for
+    if id < 0 or id >= self.s.m.entries.len()
         return
-    e := s.m.entries[id]
+    e := self.s.m.entries[id]
     if label == REVEAL
-        finder(["-R", e.path])
+        self.finder(["-R", e.path])
     elif label == OPEN
-        finder([e.path])
+        self.finder([e.path])
     elif label == COPY and e.path != ""
-        out.push(app.clipboard(e.path))
-        s.notice = "Copied {e.path}"
+        self.out.push(app.clipboard(e.path))
+        self.s.notice = "Copied {e.path}"
     elif label == SHOW
-        s.filter = ""
-        s.find = ""
-        go(e.parent)
-        s.sel = id
-        row := s.shown().index_of(id) else 0
-        s.top = (row.to_float() * state.ROW_H - 60.0).max(0.0).min(view.max_scroll(s))
+        self.s.filter = ""
+        self.s.find = ""
+        self.go(e.parent)
+        self.s.sel = id
+        row := self.s.shown().index_of(id) else 0
+        self.s.top = (row.to_float() * state.ROW_H - 60.0).max(0.0).min(view.max_scroll(self.s))
     elif label == INTO
-        go(id)
+        self.go(id)
     elif label == MARK
-        s.marks.add(id)
-        s.undo = []
+        self.s.marks.add(id)
+        self.s.undo = []
     elif label == UNMARK
-        s.marks.remove(id)
+        self.s.marks.remove(id)
 
 ## Runs `open` with `args` (Finder opens or reveals the path). The mock tree has no paths.
 fn Husk.finder(mut self, args List[str])
     if (args.last() else "") == ""
-        s.notice = "This is sample data; scan a folder to open real files."
+        self.s.notice = "This is sample data; scan a folder to open real files."
         return
     r := proc.run("/usr/bin/open", args, "", 10000) else err
-        s.notice = "open failed: {err}"
+        self.s.notice = "open failed: {err}"
         return
     if not r.ok()
-        s.notice = "open failed: {r.text().trim()}"
+        self.s.notice = "open failed: {r.text().trim()}"
 
 fn Husk.click(mut self, x float, y float, clicks int)
-    r := view.hit(f, x, y) else return
+    r := view.hit(self.f, x, y) else return
     match r.kind
         "nav" =>
-            s.filter = r.arg
-            s.find = ""
-            s.cur = 0
-            s.sel = -1
-            s.top = 0.0
-        "crumb" => go(r.k)
-        "target" => start(r.arg)
-        "rescan" => start(last)
+            self.s.filter = r.arg
+            self.s.find = ""
+            self.s.cur = 0
+            self.s.sel = -1
+            self.s.top = 0.0
+        "crumb" => self.go(r.k)
+        "target" => self.start(r.arg)
+        "rescan" => self.start(self.last)
         "tile" | "row" =>
-            e := s.m.entries[r.k]
-            if s.sel == r.k and e.is_dir and not e.kids.is_empty()
-                go(r.k)
+            e := self.s.m.entries[r.k]
+            if self.s.sel == r.k and e.is_dir and not e.kids.is_empty()
+                self.go(r.k)
             elif clicks >= 2 and not e.is_dir
-                finder(["-R", e.path])
+                self.finder(["-R", e.path])
             else
-                s.sel = r.k
+                self.s.sel = r.k
         "check" =>
-            if not s.marks.add(r.k)
-                s.marks.remove(r.k)
-            s.sel = r.k
-            s.undo = []
+            if not self.s.marks.add(r.k)
+                self.s.marks.remove(r.k)
+            self.s.sel = r.k
+            self.s.undo = []
         "sort" =>
-            if s.sort_key == r.arg
-                s.desc = not s.desc
+            if self.s.sort_key == r.arg
+                self.s.desc = not self.s.desc
             else
-                s.sort_key = r.arg
-                s.desc = r.arg != "name"
-            s.top = 0.0
+                self.s.sort_key = r.arg
+                self.s.desc = r.arg != "name"
+            self.s.top = 0.0
         "all_safe" =>
-            for id in mock.rows(s.m, 0, "safe", s.eff)
-                s.marks.add(id)
-            s.undo = []
+            for id in mock.rows(self.s.m, 0, "safe", self.s.eff)
+                self.s.marks.add(id)
+            self.s.undo = []
         "review" =>
-            if not s.marks.is_empty()
-                s.sheet = true
-        "cancel" => cancel()
-        "cloudbox" => s.cloud_delete = not s.cloud_delete
-        "admin_go" => admin_go()
-        "trash" => trash()
-        "undo" => undo()
+            if not self.s.marks.is_empty()
+                self.s.sheet = true
+        "cancel" => self.cancel()
+        "cloudbox" => self.s.cloud_delete = not self.s.cloud_delete
+        "admin_go" => self.admin_go()
+        "trash" => self.trash()
+        "undo" => self.undo()
         _ => return
 
 ## Did the failure come from permissions? (fs.trash gives the OS's words.)
@@ -374,10 +378,10 @@ fn denied(text str) bool
 
 ## Cancel on a sheet: the admin sheet skips its items, the review sheet just closes.
 fn Husk.cancel(mut self)
-    if not s.admin.is_empty()
-        s.notice = "Skipped {s.admin.len()} items that need administrator permission."
-        s.admin = []
-    s.sheet = false
+    if not self.s.admin.is_empty()
+        self.s.notice = "Skipped {self.s.admin.len()} items that need administrator permission."
+        self.s.admin = []
+    self.s.sheet = false
 
 ## Moves the marked entries out of the way. An item in iCloud Drive is offloaded
 ## (this Mac's copy goes, iCloud keeps the file) unless the sheet's box says to delete it from
@@ -385,23 +389,23 @@ fn Husk.cancel(mut self)
 ## the account may not remove waits for the admin sheet. Mock entries (no path) are only
 ## hidden, and Undo shows them again.
 fn Husk.trash(mut self)
-    ids := mock.top_marks(s.m, s.marks)
+    ids := mock.top_marks(self.s.m, self.s.marks)
     mut moved := List[int]()
     mut need := List[int]()
     mut offloaded := 0
     mut real := false
     mut why := ""
     for id in ids
-        e := s.m.entries[id]
+        e := self.s.m.entries[id]
         if e.path == ""
-            s.gone.add(id)
+            self.s.gone.add(id)
             moved.push(id)
             continue
         real = true
-        if e.icloud and not s.cloud_delete
+        if e.icloud and not self.s.cloud_delete
             bad := if e.is_dir then sysops.evict(e.path) else sysops.evict_file(e.path)
             if bad == ""
-                s.gone.add(id)
+                self.s.gone.add(id)
                 offloaded += 1
                 continue
             if bad != sysops.NOT_CLOUD
@@ -415,85 +419,85 @@ fn Husk.trash(mut self)
                 log.warn("trash failed: {e.path}: {err}")
                 why = "{err}"
             continue
-        s.gone.add(id)
+        self.s.gone.add(id)
         moved.push(id)
-    s.undo = List[int]()
-    s.notice = why
+    self.s.undo = List[int]()
+    self.s.notice = why
     if not real
-        s.undo = moved
+        self.s.undo = moved
     elif why == ""
-        s.notice = "Moved {moved.len()} to the Trash (Put Back in Finder restores them). Offloaded {offloaded} to iCloud."
-    s.marks = {}
-    s.sel = -1
-    s.eff = mock.sizes(s.m, s.gone)
-    if s.eff[s.cur] <= 0
-        s.cur = 0
-    s.admin = need
-    s.sheet = not need.is_empty()
-    s.cloud_delete = false
+        self.s.notice = "Moved {moved.len()} to the Trash (Put Back in Finder restores them). Offloaded {offloaded} to iCloud."
+    self.s.marks = {}
+    self.s.sel = -1
+    self.s.eff = mock.sizes(self.s.m, self.s.gone)
+    if self.s.eff[self.s.cur] <= 0
+        self.s.cur = 0
+    self.s.admin = need
+    self.s.sheet = not need.is_empty()
+    self.s.cloud_delete = false
 
 ## The admin sheet's Allow: delete the waiting items with one macOS password prompt.
 fn Husk.admin_go(mut self)
     mut paths := List[str]()
-    for id in s.admin
-        paths.push(s.m.entries[id].path)
+    for id in self.s.admin
+        paths.push(self.s.m.entries[id].path)
     bad := sysops.remove_admin(paths)
     if bad == ""
-        for id in s.admin
-            s.gone.add(id)
-        s.notice = "Deleted {s.admin.len()} items with administrator permission."
-        s.eff = mock.sizes(s.m, s.gone)
-        if s.eff[s.cur] <= 0
-            s.cur = 0
+        for id in self.s.admin
+            self.s.gone.add(id)
+        self.s.notice = "Deleted {self.s.admin.len()} items with administrator permission."
+        self.s.eff = mock.sizes(self.s.m, self.s.gone)
+        if self.s.eff[self.s.cur] <= 0
+            self.s.cur = 0
     else
-        s.notice = bad
-    s.admin = []
-    s.sheet = false
+        self.s.notice = bad
+    self.s.admin = []
+    self.s.sheet = false
 
 fn Husk.undo(mut self)
-    for id in s.undo
-        s.gone.remove(id)
-    s.undo = []
-    s.eff = mock.sizes(s.m, s.gone)
+    for id in self.s.undo
+        self.s.gone.remove(id)
+    self.s.undo = []
+    self.s.eff = mock.sizes(self.s.m, self.s.gone)
 
 ## Keys: Escape closes the sheet, Backspace goes up, the arrows move the selection,
 ## Return looks inside the selected folder (or reveals a file), Space ticks it.
 fn Husk.key(mut self, name str)
     k := name.to_lower()
-    if s.sheet
+    if self.s.sheet
         if k == "escape"
-            cancel()
+            self.cancel()
         return
-    if k == "backspace" and s.filter == "" and s.cur > 0
-        go(s.m.entries[s.cur].parent)
+    if k == "backspace" and self.s.filter == "" and self.s.cur > 0
+        self.go(self.s.m.entries[self.s.cur].parent)
         return
-    ids := s.shown()
+    ids := self.s.shown()
     if ids.is_empty()
         return
-    at := ids.index_of(s.sel) else -1
+    at := ids.index_of(self.s.sel) else -1
     if k == "down" or k == "up"
         mut n := (at - 1).max(0)
         if at < 0
             n = 0
         elif k == "down"
             n = (at + 1).min(ids.len() - 1)
-        s.sel = ids[n]
+        self.s.sel = ids[n]
         # Keep the selected row in view.
         ry := n.to_float() * state.ROW_H
-        if ry < s.top
-            s.top = ry
-        elif ry + state.ROW_H > s.top + view.list_height(s)
-            s.top = (ry + state.ROW_H - view.list_height(s)).min(view.max_scroll(s))
+        if ry < self.s.top
+            self.s.top = ry
+        elif ry + state.ROW_H > self.s.top + view.list_height(self.s)
+            self.s.top = (ry + state.ROW_H - view.list_height(self.s)).min(view.max_scroll(self.s))
     elif k == "enter" and at >= 0
-        e := s.m.entries[s.sel]
+        e := self.s.m.entries[self.s.sel]
         if e.is_dir and not e.kids.is_empty()
-            go(s.sel)
+            self.go(self.s.sel)
         else
-            finder(["-R", e.path])
+            self.finder(["-R", e.path])
     elif k == " " and at >= 0
-        if not s.marks.add(s.sel)
-            s.marks.remove(s.sel)
-        s.undo = []
+        if not self.s.marks.add(self.s.sel)
+            self.s.marks.remove(self.s.sel)
+        self.s.undo = []
 
 fn fresh() Husk
     mut h := Husk(
@@ -597,7 +601,7 @@ pub fn run(root str)
 
 @test fn starts_on_the_overview()
     mut h := fresh()
-    screens := app.script(mut h, [app.event("start")])
+    screens := app.script(mut h, [app.event(app.EventKind.Start)])
     assert(screens[0].contains("canvas #main"))
     assert_eq(h.s.cur, 0)
 
@@ -635,7 +639,7 @@ pub fn run(root str)
     mut h := fresh()
     h.s.scanned = false
     h.update(app.edit("path", "/tmp/x"))
-    mut e := app.event("submit")
+    mut e := app.event(app.EventKind.Submit)
     e.id = "path"
     h.update(e)
     assert_eq(h.s.path, "/tmp/x")
@@ -670,7 +674,7 @@ pub fn run(root str)
 @test fn right_click_opens_a_menu_and_ticks()
     mut h := fresh()
     tile := [r for r in h.f.regs if r.kind == "tile"][0]
-    mut ev := app.event("click")
+    mut ev := app.event(app.EventKind.Click)
     ev.id = "main"
     ev.text = "right"
     ev.x = tile.x + 4.0
@@ -678,7 +682,7 @@ pub fn run(root str)
     h.update(ev)
     menu := h.popup() else unreachable("no menu")
     assert(menu.items.contains(MARK))
-    mut pick := app.event("popup")
+    mut pick := app.event(app.EventKind.Popup)
     pick.id = "item"
     pick.text = MARK
     h.update(pick)
@@ -696,13 +700,13 @@ pub fn run(root str)
 @test fn hovering_a_tile_shows_its_card()
     mut h := fresh()
     tile := [r for r in h.f.regs if r.kind == "tile"][0]
-    mut ev := app.event("move")
+    mut ev := app.event(app.EventKind.Move)
     ev.id = "main"
     ev.x = tile.x + 4.0
     ev.y = tile.y + 4.0
     h.update(ev)
     assert_eq(h.s.hover, tile.k)
-    h.update(app.event("leave"))
+    h.update(app.event(app.EventKind.Leave))
     assert_eq(h.s.hover, -1)
 
 @test fn arrows_move_the_selection()
